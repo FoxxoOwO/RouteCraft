@@ -15,11 +15,18 @@ pub enum DeviceType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Vlan {
+    pub id: u16,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceState {
     pub id: String,
     pub hostname: String,
     pub device_type: DeviceType,
     pub interfaces: BTreeMap<String, Interface>,
+    pub vlans: BTreeMap<u16, Vlan>,
     pub mac_table: MacTable,
     pub arp_table: ArpTable,
     pub routing_table: RoutingTable,
@@ -27,15 +34,23 @@ pub struct DeviceState {
 
 impl DeviceState {
     pub fn new(id: impl Into<String>, hostname: impl Into<String>, device_type: DeviceType) -> Self {
+        let mut vlans = BTreeMap::new();
+        vlans.insert(1, Vlan { id: 1, name: "default".to_string() });
+
         Self {
             id: id.into(),
             hostname: hostname.into(),
             device_type,
             interfaces: BTreeMap::new(),
+            vlans,
             mac_table: MacTable::new(),
             arp_table: ArpTable::new(),
             routing_table: RoutingTable::new(),
         }
+    }
+
+    pub fn add_vlan(&mut self, id: u16, name: impl Into<String>) {
+        self.vlans.insert(id, Vlan { id, name: name.into() });
     }
 
     pub fn add_interface(&mut self, interface: Interface) {
@@ -57,7 +72,19 @@ impl DeviceState {
             }
         }
 
-        // 2. Cisco abbreviations:
+        // 2. Subinterface lookup, e.g. "gi0/0.10"
+        if let Some((parent_q, sub_id)) = query.split_once('.') {
+            if let Some(canonical_parent) = self.find_interface_name(parent_q) {
+                let candidate = format!("{}.{}", canonical_parent, sub_id);
+                for name in self.interfaces.keys() {
+                    if name.eq_ignore_ascii_case(&candidate) {
+                        return Some(name.clone());
+                    }
+                }
+            }
+        }
+
+        // 3. Cisco abbreviations:
         // gi0/0 -> GigabitEthernet0/0
         // fa0/1 -> FastEthernet0/1
         // lo0   -> Loopback0
@@ -74,6 +101,27 @@ impl DeviceState {
                 if q_suffix == lower_suffix {
                     return Some(name.clone());
                 }
+            }
+        }
+
+        None
+    }
+
+    pub fn get_or_create_interface(&mut self, query: &str) -> Option<String> {
+        if let Some(name) = self.find_interface_name(query) {
+            return Some(name);
+        }
+
+        // If subinterface like "gi0/0.10", create it dynamically
+        if let Some((parent_q, sub_id)) = query.split_once('.') {
+            if let Some(canonical_parent) = self.find_interface_name(parent_q) {
+                let parent_mac = self.interfaces.get(&canonical_parent)?.mac_address;
+                let sub_name = format!("{}.{}", canonical_parent, sub_id);
+                let mut sub_iface = Interface::new(&sub_name, parent_mac);
+                sub_iface.admin_status = AdminStatus::Up;
+                sub_iface.oper_status = OperStatus::Up;
+                self.interfaces.insert(sub_name.clone(), sub_iface);
+                return Some(sub_name);
             }
         }
 
@@ -124,7 +172,6 @@ impl DeviceState {
             .ok_or_else(|| DeviceError::InterfaceNotFound(name.to_string()))?;
 
         if let Some(iface) = self.interfaces.get_mut(&canonical) {
-            // Can only be oper up if admin is up
             if iface.admin_status == AdminStatus::Up {
                 iface.oper_status = status;
             } else {
@@ -141,7 +188,14 @@ impl DeviceState {
         self.routing_table.clear_connected_routes();
 
         for iface in self.interfaces.values() {
-            if iface.is_up() {
+            let is_up = if let Some(parent_name) = &iface.parent_interface {
+                iface.admin_status == AdminStatus::Up
+                    && self.interfaces.get(parent_name).map(|p| p.is_up()).unwrap_or(false)
+            } else {
+                iface.is_up()
+            };
+
+            if is_up {
                 if let Some(cidr) = iface.ipv4_address {
                     let network_cidr = Ipv4Cidr {
                         ip: cidr.network_address(),

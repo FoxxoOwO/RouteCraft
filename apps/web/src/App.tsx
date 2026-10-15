@@ -10,6 +10,7 @@ import { TopologyCanvas } from './components/TopologyCanvas';
 import { SimulationControls } from './components/SimulationControls';
 import { DecisionLogPanel } from './components/DecisionLogPanel';
 import { DeviceDrawer } from './components/DeviceDrawer';
+import { PduInspectorModal } from './components/PduInspectorModal';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -22,6 +23,7 @@ export const App: React.FC = () => {
 
   const [events, setEvents] = useState<SimEventModel[]>([]);
   const [activePacket, setActivePacket] = useState<SimEventModel | null>(null);
+  const [selectedEventForPdu, setSelectedEventForPdu] = useState<SimEventModel | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -30,7 +32,7 @@ export const App: React.FC = () => {
     init()
       .then(() => {
         setWasmReady(true);
-        loadPreset('basic');
+        loadPreset('vlan'); // Default to the impressive 802.1Q Inter-VLAN setup
       })
       .catch((err) => {
         console.error('Failed to initialize RouteCraft Wasm module:', err);
@@ -57,12 +59,12 @@ export const App: React.FC = () => {
     }
   }, [selectedNodeId]);
 
-  const loadPreset = (preset: 'basic' | 'routed') => {
-    // Reset simulation
+  const loadPreset = (preset: 'basic' | 'routed' | 'vlan') => {
     const newSim = new WasmSimulation();
     simRef.current = newSim;
     setEvents([]);
     setActivePacket(null);
+    setSelectedEventForPdu(null);
     setIsPlaying(false);
 
     if (preset === 'basic') {
@@ -86,11 +88,11 @@ export const App: React.FC = () => {
       newSim.add_link('link2', 'sw1', 'Fa0/2', 'pc2', 'eth0', 5);
 
       setNodePositions({
-        pc1: { x: 120, y: 240 },
-        sw1: { x: 380, y: 240 },
-        pc2: { x: 640, y: 240 },
+        pc1: { x: 140, y: 260 },
+        sw1: { x: 400, y: 260 },
+        pc2: { x: 660, y: 260 },
       });
-    } else {
+    } else if (preset === 'routed') {
       // Routed 2-Subnet Preset
       // 1. PC1 (Subnet 192.168.1.0/24)
       newSim.add_node('pc1', 'PC-1', 'host');
@@ -118,9 +120,83 @@ export const App: React.FC = () => {
       newSim.add_link('link2', 'r1', 'Gi0/1', 'pc2', 'eth0', 5);
 
       setNodePositions({
-        pc1: { x: 120, y: 240 },
-        r1: { x: 380, y: 240 },
-        pc2: { x: 640, y: 240 },
+        pc1: { x: 140, y: 260 },
+        r1: { x: 400, y: 260 },
+        pc2: { x: 660, y: 260 },
+      });
+    } else {
+      // Preset 3: Inter-VLAN Routing (Router-on-a-Stick + 802.1Q)
+      // 1. Router R1
+      newSim.add_node('r1', 'Router-1', 'router');
+      newSim.add_interface('r1', 'Gi0/0', '00:aa:bb:cc:00:01');
+      newSim.set_interface_admin_status('r1', 'Gi0/0', true);
+
+      // Sub-interface Gi0/0.10 (VLAN 10)
+      newSim.add_interface('r1', 'Gi0/0.10', '00:aa:bb:cc:00:10');
+      newSim.set_interface_admin_status('r1', 'Gi0/0.10', true);
+      newSim.execute_cli('r1', 'cisco', 'conf t');
+      newSim.execute_cli('r1', 'cisco', 'interface Gi0/0.10');
+      newSim.execute_cli('r1', 'cisco', 'encapsulation dot1q 10');
+      newSim.execute_cli('r1', 'cisco', 'ip address 192.168.10.1 255.255.255.0');
+      newSim.execute_cli('r1', 'cisco', 'exit');
+
+      // Sub-interface Gi0/0.20 (VLAN 20)
+      newSim.add_interface('r1', 'Gi0/0.20', '00:aa:bb:cc:00:20');
+      newSim.set_interface_admin_status('r1', 'Gi0/0.20', true);
+      newSim.execute_cli('r1', 'cisco', 'interface Gi0/0.20');
+      newSim.execute_cli('r1', 'cisco', 'encapsulation dot1q 20');
+      newSim.execute_cli('r1', 'cisco', 'ip address 192.168.20.1 255.255.255.0');
+      newSim.execute_cli('r1', 'cisco', 'exit');
+      newSim.execute_cli('r1', 'cisco', 'exit');
+
+      // 2. Switch SW1
+      newSim.add_node('sw1', 'Switch-1', 'switch');
+      newSim.add_interface('sw1', 'Fa0/1', '00:aa:bb:cc:dd:01');
+      newSim.add_interface('sw1', 'Fa0/2', '00:aa:bb:cc:dd:02');
+      newSim.add_interface('sw1', 'Fa0/3', '00:aa:bb:cc:dd:03');
+
+      newSim.execute_cli('sw1', 'cisco', 'conf t');
+      newSim.execute_cli('sw1', 'cisco', 'vlan 10');
+      newSim.execute_cli('sw1', 'cisco', 'name Sales');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+      newSim.execute_cli('sw1', 'cisco', 'vlan 20');
+      newSim.execute_cli('sw1', 'cisco', 'name Engineering');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+      newSim.execute_cli('sw1', 'cisco', 'interface Fa0/1');
+      newSim.execute_cli('sw1', 'cisco', 'switchport mode trunk');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+      newSim.execute_cli('sw1', 'cisco', 'interface Fa0/2');
+      newSim.execute_cli('sw1', 'cisco', 'switchport mode access');
+      newSim.execute_cli('sw1', 'cisco', 'switchport access vlan 10');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+      newSim.execute_cli('sw1', 'cisco', 'interface Fa0/3');
+      newSim.execute_cli('sw1', 'cisco', 'switchport mode access');
+      newSim.execute_cli('sw1', 'cisco', 'switchport access vlan 20');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+      newSim.execute_cli('sw1', 'cisco', 'exit');
+
+      // 3. PC1 (VLAN 10 Sales)
+      newSim.add_node('pc1', 'PC-Sales-1', 'host');
+      newSim.add_interface('pc1', 'eth0', '00:11:22:33:44:10');
+      newSim.set_interface_ip('pc1', 'eth0', '192.168.10.10/24');
+      newSim.execute_cli('pc1', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.10.1');
+
+      // 4. PC2 (VLAN 20 Engineering)
+      newSim.add_node('pc2', 'PC-Eng-2', 'host');
+      newSim.add_interface('pc2', 'eth0', '00:11:22:33:44:20');
+      newSim.set_interface_ip('pc2', 'eth0', '192.168.20.20/24');
+      newSim.execute_cli('pc2', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.20.1');
+
+      // Links
+      newSim.add_link('link_trunk', 'r1', 'Gi0/0', 'sw1', 'Fa0/1', 5);
+      newSim.add_link('link_vlan10', 'sw1', 'Fa0/2', 'pc1', 'eth0', 5);
+      newSim.add_link('link_vlan20', 'sw1', 'Fa0/3', 'pc2', 'eth0', 5);
+
+      setNodePositions({
+        r1: { x: 400, y: 80 },
+        sw1: { x: 400, y: 250 },
+        pc1: { x: 160, y: 390 },
+        pc2: { x: 640, y: 390 },
       });
     }
 
@@ -165,7 +241,7 @@ export const App: React.FC = () => {
     try {
       simRef.current.trigger_ping(srcNodeId, targetIp);
       refreshTopology();
-      setIsPlaying(true); // Automatically play events when ping starts
+      setIsPlaying(true);
     } catch (err) {
       console.error('Failed to trigger ping:', err);
     }
@@ -219,6 +295,123 @@ export const App: React.FC = () => {
     }
   };
 
+  // Dynamic Topology Add / Delete Actions
+  const handleAddNode = (type: 'router' | 'switch' | 'host') => {
+    if (!simRef.current) return;
+    const count = topology.nodes.filter((n) => n.device_type === type).length + 1;
+    const prefix = type === 'router' ? 'R' : type === 'switch' ? 'SW' : 'PC';
+    const id = `${prefix.toLowerCase()}${count}_${Date.now().toString(36).slice(-3)}`;
+    const hostname = `${prefix}-${count}`;
+
+    try {
+      simRef.current.add_node(id, hostname, type);
+
+      // Add default interfaces
+      if (type === 'router') {
+        simRef.current.add_interface(id, 'Gi0/0', undefined);
+        simRef.current.add_interface(id, 'Gi0/1', undefined);
+      } else if (type === 'switch') {
+        simRef.current.add_interface(id, 'Fa0/1', undefined);
+        simRef.current.add_interface(id, 'Fa0/2', undefined);
+        simRef.current.add_interface(id, 'Fa0/3', undefined);
+        simRef.current.add_interface(id, 'Fa0/4', undefined);
+      } else {
+        simRef.current.add_interface(id, 'eth0', undefined);
+      }
+
+      setNodePositions((prev) => ({
+        ...prev,
+        [id]: { x: 300 + Math.random() * 80, y: 200 + Math.random() * 80 },
+      }));
+
+      refreshTopology();
+    } catch (err) {
+      console.error('Failed to add node:', err);
+    }
+  };
+
+  const handleDeleteNode = (id: string) => {
+    if (!simRef.current) return;
+    simRef.current.remove_node(id);
+    if (selectedNodeId === id) setSelectedNodeId(null);
+    refreshTopology();
+  };
+
+  const handleConnectLink = (nodeA: string, portA: string, nodeB: string, portB: string) => {
+    if (!simRef.current) return;
+    const linkId = `link_${Date.now()}`;
+    try {
+      simRef.current.add_link(linkId, nodeA, portA, nodeB, portB, 5);
+      refreshTopology();
+    } catch (err) {
+      console.error('Failed to add link:', err);
+    }
+  };
+
+  const handleToggleLink = (linkId: string, connected: boolean) => {
+    if (!simRef.current) return;
+    try {
+      simRef.current.toggle_link(linkId, connected);
+      refreshTopology();
+    } catch (err) {
+      console.error('Failed to toggle link:', err);
+    }
+  };
+
+  const handleDeleteLink = (linkId: string) => {
+    if (!simRef.current) return;
+    try {
+      simRef.current.remove_link(linkId);
+      refreshTopology();
+    } catch (err) {
+      console.error('Failed to delete link:', err);
+    }
+  };
+
+  // Export / Import
+  const handleExportTopology = () => {
+    if (!simRef.current) return;
+    try {
+      const json = simRef.current.export_topology_json();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `routecraft_lab_${Date.now()}.onlab`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
+
+  const handleImportTopology = (jsonStr: string) => {
+    if (!simRef.current) return;
+    try {
+      simRef.current.import_topology_json(jsonStr);
+      setEvents([]);
+      setActivePacket(null);
+      setSelectedEventForPdu(null);
+      setSelectedNodeId(null);
+
+      // Auto position nodes if empty
+      const topo = simRef.current.get_topology() as TopologyModel;
+      const positions: Record<string, { x: number; y: number }> = {};
+      topo.nodes.forEach((n, idx) => {
+        positions[n.id] = {
+          x: 120 + (idx % 4) * 220,
+          y: 180 + Math.floor(idx / 4) * 160,
+        };
+      });
+      setNodePositions(positions);
+      setTopology(topo);
+      setPendingCount(0);
+    } catch (err) {
+      alert(`Import error: ${err}`);
+      console.error('Import failed:', err);
+    }
+  };
+
   const selectedNode = topology.nodes.find((n) => n.id === selectedNodeId) || null;
 
   if (!wasmReady) {
@@ -239,21 +432,23 @@ export const App: React.FC = () => {
         onStep={handleStep}
         onReset={(preset) => loadPreset(preset)}
         onTriggerPing={handleTriggerPing}
+        onExportTopology={handleExportTopology}
+        onImportTopology={handleImportTopology}
         pendingEventCount={pendingCount}
         nodes={topology.nodes}
       />
 
       {/* Main Workspace Layout */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Side: Decision Log & PDU Inspector */}
+        {/* Left Side: Decision Log & PDU Inspector Trigger */}
         <DecisionLogPanel
           events={events}
           onClear={() => setEvents([])}
-          onSelectEvent={(ev) => console.log('Selected event:', ev)}
-          selectedEventId={activePacket?.id || null}
+          onSelectEvent={(ev) => setSelectedEventForPdu(ev)}
+          selectedEventId={activePacket?.id || selectedEventForPdu?.id || null}
         />
 
-        {/* Center: Topology Canvas */}
+        {/* Center: Interactive Topology Canvas */}
         <div className="flex-1 relative overflow-hidden">
           <TopologyCanvas
             nodes={topology.nodes}
@@ -263,6 +458,11 @@ export const App: React.FC = () => {
             selectedNodeId={selectedNodeId}
             onSelectNode={handleSelectNode}
             activePacket={activePacket}
+            onAddNode={handleAddNode}
+            onDeleteNode={handleDeleteNode}
+            onConnectLink={handleConnectLink}
+            onToggleLink={handleToggleLink}
+            onDeleteLink={handleDeleteLink}
           />
         </div>
 
@@ -278,6 +478,14 @@ export const App: React.FC = () => {
           />
         )}
       </div>
+
+      {/* Wireshark-like Deep PDU Inspector Modal */}
+      {selectedEventForPdu && (
+        <PduInspectorModal
+          event={selectedEventForPdu}
+          onClose={() => setSelectedEventForPdu(null)}
+        />
+      )}
     </div>
   );
 };

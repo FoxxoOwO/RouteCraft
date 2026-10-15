@@ -40,6 +40,16 @@ pub enum Duplex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SwitchportMode {
+    Routed,
+    Access(u16),
+    Trunk {
+        native_vlan: u16,
+        allowed_vlans: Vec<u16>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interface {
     pub name: String,
     pub mac_address: MacAddress,
@@ -47,7 +57,9 @@ pub struct Interface {
     pub admin_status: AdminStatus,
     pub oper_status: OperStatus,
     pub mtu: u32,
-    pub vlan_id: Option<u16>,
+    pub switchport_mode: SwitchportMode,
+    pub encapsulation_vlan: Option<u16>,
+    pub parent_interface: Option<String>,
     pub speed_mbps: u32,
     pub duplex: Duplex,
     pub description: Option<String>,
@@ -55,18 +67,36 @@ pub struct Interface {
 
 impl Interface {
     pub fn new(name: impl Into<String>, mac_address: MacAddress) -> Self {
+        let name_str = name.into();
+        let is_sub = name_str.contains('.');
+        let parent = if is_sub {
+            name_str.split('.').next().map(|s| s.to_string())
+        } else {
+            None
+        };
+
         Self {
-            name: name.into(),
+            name: name_str,
             mac_address,
             ipv4_address: None,
-            admin_status: AdminStatus::Down, // Default in routers is admin down
+            admin_status: AdminStatus::Down,
             oper_status: OperStatus::Down,
             mtu: 1500,
-            vlan_id: None,
+            switchport_mode: SwitchportMode::Access(1),
+            encapsulation_vlan: None,
+            parent_interface: parent,
             speed_mbps: 1000,
             duplex: Duplex::Auto,
             description: None,
         }
+    }
+
+    pub fn new_switchport(name: impl Into<String>, mac_address: MacAddress) -> Self {
+        let mut iface = Self::new(name, mac_address);
+        iface.admin_status = AdminStatus::Up;
+        iface.oper_status = OperStatus::Up;
+        iface.switchport_mode = SwitchportMode::Access(1);
+        iface
     }
 
     pub fn is_up(&self) -> bool {

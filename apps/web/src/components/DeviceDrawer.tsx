@@ -296,6 +296,18 @@ export const DeviceDrawer: React.FC<Props> = ({
                       <span className="text-slate-200 font-semibold">{iface.ip || 'unassigned'}</span>
                     </div>
 
+                    {iface.switchport_mode && iface.switchport_mode !== 'routed' && (
+                      <div className="text-[10px] text-purple-300 font-mono">
+                        Mode: <span className="font-semibold">{iface.switchport_mode}</span>
+                      </div>
+                    )}
+
+                    {iface.encapsulation_vlan && (
+                      <div className="text-[10px] text-purple-400 font-mono font-semibold">
+                        Encapsulation: 802.1Q (VLAN {iface.encapsulation_vlan})
+                      </div>
+                    )}
+
                     <div className="text-[10px] text-slate-500 font-mono">
                       MAC: {iface.mac}
                     </div>
@@ -320,6 +332,36 @@ export const DeviceDrawer: React.FC<Props> = ({
         {/* State Tables Tab */}
         {activeTab === 'tables' && (
           <div className="flex-1 p-4 overflow-y-auto space-y-6 text-xs">
+            {/* VLAN Database */}
+            {tables?.vlans && tables.vlans.length > 0 && (
+              <div>
+                <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-2">
+                  <Table className="w-3.5 h-3.5 text-purple-400" />
+                  VLAN Database (802.1Q)
+                </h3>
+                <div className="bg-[#1E293B]/60 rounded-lg overflow-hidden border border-gray-700/60">
+                  <table className="w-full font-mono text-[11px] text-left">
+                    <thead className="bg-gray-800/60 text-slate-400">
+                      <tr>
+                        <th className="p-2">VLAN ID</th>
+                        <th className="p-2">Name</th>
+                        <th className="p-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {tables.vlans.map((v) => (
+                        <tr key={v.id}>
+                          <td className="p-2 text-purple-300 font-bold">{v.id}</td>
+                          <td className="p-2 text-slate-200">{v.name}</td>
+                          <td className="p-2 text-emerald-400">active</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* CAM Table (Switches) */}
             <div>
               <h3 className="text-xs font-semibold text-slate-200 mb-2 flex items-center gap-2">

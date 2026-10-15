@@ -1,14 +1,17 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::net::Ipv4Addr;
-use routecraft_core::{AdminStatus, DeviceState, DeviceType, MacAddress, OperStatus};
+use serde::{Deserialize, Serialize};
+use routecraft_core::{
+    AdminStatus, DeviceState, DeviceType, Interface, MacAddress, OperStatus, SwitchportMode,
+};
 use routecraft_protocols::{
     ArpOperation, EthernetFrame, IcmpType, Ipv4Payload, PacketPayload,
 };
 
 pub type SimTime = u64; // Time in milliseconds
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimLink {
     pub id: String,
     pub node_a: String,
@@ -90,38 +93,95 @@ impl SimNode {
 
         // ================= SWITCH LOGIC =================
         if self.state.device_type == DeviceType::Switch {
+            let ingress_vlan = match &iface.switchport_mode {
+                SwitchportMode::Access(vlan) => {
+                    if frame.vlan_tag.is_some() {
+                        log.push(format!(
+                            "[{}] Dropped tagged frame on Access port {}",
+                            self.state.hostname, ingress_port
+                        ));
+                        return (log, outgoing);
+                    }
+                    *vlan
+                }
+                SwitchportMode::Trunk { native_vlan, allowed_vlans } => {
+                    if let Some(tag) = frame.vlan_tag {
+                        if !allowed_vlans.is_empty() && !allowed_vlans.contains(&tag.vlan_id) {
+                            log.push(format!(
+                                "[{}] VLAN {} not allowed on Trunk port {}. Dropped.",
+                                self.state.hostname, tag.vlan_id, ingress_port
+                            ));
+                            return (log, outgoing);
+                        }
+                        tag.vlan_id
+                    } else {
+                        *native_vlan
+                    }
+                }
+                SwitchportMode::Routed => 1,
+            };
+
             log.push(format!(
-                "[{}] Switch received frame on {} [{} -> {}]",
-                self.state.hostname, ingress_port, frame.src_mac, frame.dst_mac
+                "[{}] Switch received frame on {} (VLAN {}) [{} -> {}]",
+                self.state.hostname, ingress_port, ingress_vlan, frame.src_mac, frame.dst_mac
             ));
 
             // 1. MAC Learning
             self.state
                 .mac_table
-                .learn(frame.src_mac, ingress_port.to_string(), 1);
+                .learn(frame.src_mac, ingress_port.to_string(), ingress_vlan);
             log.push(format!(
-                "[{}] CAM: Learned MAC {} on port {}",
-                self.state.hostname, frame.src_mac, ingress_port
+                "[{}] CAM: Learned MAC {} on port {} (VLAN {})",
+                self.state.hostname, frame.src_mac, ingress_port, ingress_vlan
             ));
+
+            // Helper to prepare frame for egress port
+            let prepare_egress = |out_iface: &Interface, frame: &EthernetFrame, vlan: u16| -> Option<EthernetFrame> {
+                match &out_iface.switchport_mode {
+                    SwitchportMode::Access(acc_vlan) => {
+                        if *acc_vlan == vlan {
+                            Some(frame.clone().untagged())
+                        } else {
+                            None
+                        }
+                    }
+                    SwitchportMode::Trunk { native_vlan, allowed_vlans } => {
+                        if !allowed_vlans.is_empty() && !allowed_vlans.contains(&vlan) {
+                            None
+                        } else if vlan == *native_vlan {
+                            Some(frame.clone().untagged())
+                        } else {
+                            Some(frame.clone().with_vlan(vlan))
+                        }
+                    }
+                    SwitchportMode::Routed => None,
+                }
+            };
 
             // 2. Forwarding Decision
             if frame.dst_mac.is_broadcast() || frame.dst_mac.is_multicast() {
                 log.push(format!(
-                    "[{}] Broadcast/Multicast frame. Flooding to all other active ports.",
-                    self.state.hostname
+                    "[{}] Broadcast/Multicast frame on VLAN {}. Flooding to all eligible ports.",
+                    self.state.hostname, ingress_vlan
                 ));
                 for (name, port) in &self.state.interfaces {
                     if name != ingress_port && port.is_up() {
-                        outgoing.push((name.clone(), frame.clone()));
+                        if let Some(out_frame) = prepare_egress(port, &frame, ingress_vlan) {
+                            outgoing.push((name.clone(), out_frame));
+                        }
                     }
                 }
-            } else if let Some(target_port) = self.state.mac_table.lookup(&frame.dst_mac, 1) {
+            } else if let Some(target_port) = self.state.mac_table.lookup(&frame.dst_mac, ingress_vlan) {
                 if target_port != ingress_port {
-                    log.push(format!(
-                        "[{}] CAM hit: MAC {} found on port {}. Forwarding unicast.",
-                        self.state.hostname, frame.dst_mac, target_port
-                    ));
-                    outgoing.push((target_port.to_string(), frame));
+                    if let Some(out_iface) = self.state.interfaces.get(target_port) {
+                        if let Some(out_frame) = prepare_egress(out_iface, &frame, ingress_vlan) {
+                            log.push(format!(
+                                "[{}] CAM hit: MAC {} found on port {} (VLAN {}). Forwarding unicast.",
+                                self.state.hostname, frame.dst_mac, target_port, ingress_vlan
+                            ));
+                            outgoing.push((target_port.to_string(), out_frame));
+                        }
+                    }
                 } else {
                     log.push(format!(
                         "[{}] Destination port is ingress port. Frame dropped (filtering).",
@@ -130,12 +190,14 @@ impl SimNode {
                 }
             } else {
                 log.push(format!(
-                    "[{}] CAM miss: Unknown destination MAC {}. Flooding to all other active ports.",
-                    self.state.hostname, frame.dst_mac
+                    "[{}] CAM miss: Unknown destination MAC {} on VLAN {}. Flooding to eligible ports.",
+                    self.state.hostname, frame.dst_mac, ingress_vlan
                 ));
                 for (name, port) in &self.state.interfaces {
                     if name != ingress_port && port.is_up() {
-                        outgoing.push((name.clone(), frame.clone()));
+                        if let Some(out_frame) = prepare_egress(port, &frame, ingress_vlan) {
+                            outgoing.push((name.clone(), out_frame));
+                        }
                     }
                 }
             }
@@ -144,11 +206,26 @@ impl SimNode {
         }
 
         // ================= ROUTER / HOST LOGIC =================
+        // Identify target logical interface (either physical port or dot1q subinterface)
+        let logical_iface = if let Some(tag) = frame.vlan_tag {
+            self.state
+                .interfaces
+                .values()
+                .find(|i| {
+                    i.parent_interface.as_deref() == Some(ingress_port)
+                        && i.encapsulation_vlan == Some(tag.vlan_id)
+                })
+                .cloned()
+                .unwrap_or(iface.clone())
+        } else {
+            iface.clone()
+        };
+
         // L2 filter: frame must be addressed to our interface MAC or broadcast
-        if frame.dst_mac != iface.mac_address && !frame.dst_mac.is_broadcast() {
+        if frame.dst_mac != logical_iface.mac_address && !frame.dst_mac.is_broadcast() {
             log.push(format!(
                 "[{}] Frame destination MAC {} does not match interface MAC {}. Dropped.",
-                self.state.hostname, frame.dst_mac, iface.mac_address
+                self.state.hostname, frame.dst_mac, logical_iface.mac_address
             ));
             return (log, outgoing);
         }
@@ -158,44 +235,47 @@ impl SimNode {
                 match arp.operation {
                     ArpOperation::Request => {
                         log.push(format!(
-                            "[{}] ARP Request received on {}: Who has {}? Tell {}",
-                            self.state.hostname, ingress_port, arp.target_ip, arp.sender_ip
+                            "[{}] ARP Request received on {} (logical {}): Who has {}? Tell {}",
+                            self.state.hostname, ingress_port, logical_iface.name, arp.target_ip, arp.sender_ip
                         ));
 
                         // Learn sender IP -> MAC in ARP table
                         self.state.arp_table.insert(
                             arp.sender_ip,
                             arp.sender_mac,
-                            ingress_port.to_string(),
+                            logical_iface.name.clone(),
                             false,
                         );
 
                         // Check if request is for our interface IP
-                        if let Some(our_cidr) = iface.ipv4_address {
+                        if let Some(our_cidr) = logical_iface.ipv4_address {
                             if our_cidr.ip == arp.target_ip {
                                 log.push(format!(
                                     "[{}] ARP Request is for us ({}). Sending ARP Reply.",
                                     self.state.hostname, our_cidr.ip
                                 ));
-                                let reply_frame = EthernetFrame::new_arp_reply(
-                                    iface.mac_address,
+                                let mut reply_frame = EthernetFrame::new_arp_reply(
+                                    logical_iface.mac_address,
                                     our_cidr.ip,
                                     arp.sender_mac,
                                     arp.sender_ip,
                                 );
+                                if let Some(vlan) = logical_iface.encapsulation_vlan {
+                                    reply_frame = reply_frame.with_vlan(vlan);
+                                }
                                 outgoing.push((ingress_port.to_string(), reply_frame));
                             }
                         }
                     }
                     ArpOperation::Reply => {
                         log.push(format!(
-                            "[{}] ARP Reply received on {}: {} is at {}",
-                            self.state.hostname, ingress_port, arp.sender_ip, arp.sender_mac
+                            "[{}] ARP Reply received on {} (logical {}): {} is at {}",
+                            self.state.hostname, ingress_port, logical_iface.name, arp.sender_ip, arp.sender_mac
                         ));
                         self.state.arp_table.insert(
                             arp.sender_ip,
                             arp.sender_mac,
-                            ingress_port.to_string(),
+                            logical_iface.name.clone(),
                             false,
                         );
 
@@ -208,7 +288,6 @@ impl SimNode {
                                 arp.sender_ip
                             ));
                             for mut pending_frame in queued {
-                                // Update destination MAC to the resolved ARP MAC
                                 pending_frame.dst_mac = arp.sender_mac;
                                 outgoing.push((ingress_port.to_string(), pending_frame));
                             }
@@ -219,8 +298,8 @@ impl SimNode {
 
             PacketPayload::Ipv4(ip_pkt) => {
                 log.push(format!(
-                    "[{}] IPv4 packet received on {}: {} -> {} (TTL={})",
-                    self.state.hostname, ingress_port, ip_pkt.src_ip, ip_pkt.dst_ip, ip_pkt.ttl
+                    "[{}] IPv4 packet received on {} (logical {}): {} -> {} (TTL={})",
+                    self.state.hostname, ingress_port, logical_iface.name, ip_pkt.src_ip, ip_pkt.dst_ip, ip_pkt.ttl
                 ));
 
                 // Check if packet is destined for one of our own interfaces
@@ -237,8 +316,8 @@ impl SimNode {
                                 "[{}] ICMP Echo Request received from {}. Sending Echo Reply.",
                                 self.state.hostname, ip_pkt.src_ip
                             ));
-                            let reply_frame = EthernetFrame::new_icmp_echo_reply(
-                                iface.mac_address,
+                            let mut reply_frame = EthernetFrame::new_icmp_echo_reply(
+                                logical_iface.mac_address,
                                 frame.src_mac,
                                 ip_pkt.dst_ip,
                                 ip_pkt.src_ip,
@@ -246,6 +325,9 @@ impl SimNode {
                                 icmp.identifier,
                                 64,
                             );
+                            if let Some(vlan) = logical_iface.encapsulation_vlan {
+                                reply_frame = reply_frame.with_vlan(vlan);
+                            }
                             outgoing.push((ingress_port.to_string(), reply_frame));
                         } else if icmp.icmp_type == IcmpType::EchoReply {
                             log.push(format!(
@@ -274,16 +356,27 @@ impl SimNode {
                         ));
 
                         if let Some(egress_iface) = self.state.get_interface(&egress_port) {
+                            let (actual_physical_port, maybe_vlan) = if let Some(parent) = &egress_iface.parent_interface {
+                                (parent.clone(), egress_iface.encapsulation_vlan)
+                            } else {
+                                (egress_port.clone(), None)
+                            };
+
                             let mut forwarded_frame = frame.clone();
                             if let PacketPayload::Ipv4(ref mut f_ip) = forwarded_frame.payload {
                                 f_ip.ttl -= 1;
                             }
                             forwarded_frame.src_mac = egress_iface.mac_address;
+                            if let Some(vlan) = maybe_vlan {
+                                forwarded_frame = forwarded_frame.with_vlan(vlan);
+                            } else {
+                                forwarded_frame = forwarded_frame.untagged();
+                            }
 
                             // Resolve L2 next-hop MAC via ARP
                             if let Some(next_mac) = self.state.arp_table.lookup(&target_ip) {
                                 forwarded_frame.dst_mac = *next_mac;
-                                outgoing.push((egress_port, forwarded_frame));
+                                outgoing.push((actual_physical_port, forwarded_frame));
                             } else {
                                 log.push(format!(
                                     "[{}] ARP cache miss for next hop {}. Enqueuing packet and sending ARP Request.",
@@ -295,12 +388,15 @@ impl SimNode {
                                     .push(forwarded_frame);
 
                                 if let Some(egress_ip) = egress_iface.ipv4_address {
-                                    let arp_req = EthernetFrame::new_arp_request(
+                                    let mut arp_req = EthernetFrame::new_arp_request(
                                         egress_iface.mac_address,
                                         egress_ip.ip,
                                         target_ip,
                                     );
-                                    outgoing.push((egress_port, arp_req));
+                                    if let Some(vlan) = maybe_vlan {
+                                        arp_req = arp_req.with_vlan(vlan);
+                                    }
+                                    outgoing.push((actual_physical_port, arp_req));
                                 }
                             }
                         }
@@ -353,6 +449,12 @@ impl SimNode {
             }
         };
 
+        let (actual_physical_port, maybe_vlan) = if let Some(parent) = &iface.parent_interface {
+            (parent.clone(), iface.encapsulation_vlan)
+        } else {
+            (egress_port.clone(), None)
+        };
+
         let l3_target = route.next_hop.unwrap_or(target_ip);
 
         // Check ARP table
@@ -361,7 +463,7 @@ impl SimNode {
                 "[{}] ARP hit for {}. Sending ICMP Echo Request directly.",
                 self.state.hostname, l3_target
             ));
-            let frame = EthernetFrame::new_icmp_echo_request(
+            let mut frame = EthernetFrame::new_icmp_echo_request(
                 iface.mac_address,
                 *target_mac,
                 src_ip,
@@ -369,13 +471,16 @@ impl SimNode {
                 1,
                 100,
             );
-            outgoing.push((egress_port, frame));
+            if let Some(vlan) = maybe_vlan {
+                frame = frame.with_vlan(vlan);
+            }
+            outgoing.push((actual_physical_port, frame));
         } else {
             log.push(format!(
                 "[{}] ARP miss for {}. Enqueuing ICMP Echo and sending ARP Request.",
                 self.state.hostname, l3_target
             ));
-            let icmp_frame = EthernetFrame::new_icmp_echo_request(
+            let mut icmp_frame = EthernetFrame::new_icmp_echo_request(
                 iface.mac_address,
                 MacAddress::ZERO, // will be updated when ARP reply arrives
                 src_ip,
@@ -383,10 +488,16 @@ impl SimNode {
                 1,
                 100,
             );
+            if let Some(vlan) = maybe_vlan {
+                icmp_frame = icmp_frame.with_vlan(vlan);
+            }
             self.pending_arp.entry(l3_target).or_default().push(icmp_frame);
 
-            let arp_frame = EthernetFrame::new_arp_request(iface.mac_address, src_ip, l3_target);
-            outgoing.push((egress_port, arp_frame));
+            let mut arp_frame = EthernetFrame::new_arp_request(iface.mac_address, src_ip, l3_target);
+            if let Some(vlan) = maybe_vlan {
+                arp_frame = arp_frame.with_vlan(vlan);
+            }
+            outgoing.push((actual_physical_port, arp_frame));
         }
 
         (log, outgoing)
@@ -453,6 +564,57 @@ impl NetworkSimulation {
             latency_ms,
             is_connected: true,
         });
+    }
+
+    pub fn remove_link(&mut self, link_id: &str) -> bool {
+        if let Some(pos) = self.links.iter().position(|l| l.id == link_id) {
+            let removed = self.links.remove(pos);
+            let a_has_other = self.links.iter().any(|l| {
+                (l.node_a == removed.node_a && l.port_a == removed.port_a)
+                    || (l.node_b == removed.node_a && l.port_b == removed.port_a)
+            });
+            if !a_has_other {
+                if let Some(node) = self.nodes.get_mut(&removed.node_a) {
+                    let _ = node.state.set_interface_oper_status(&removed.port_a, OperStatus::Down);
+                }
+            }
+
+            let b_has_other = self.links.iter().any(|l| {
+                (l.node_a == removed.node_b && l.port_a == removed.port_b)
+                    || (l.node_b == removed.node_b && l.port_b == removed.port_b)
+            });
+            if !b_has_other {
+                if let Some(node) = self.nodes.get_mut(&removed.node_b) {
+                    let _ = node.state.set_interface_oper_status(&removed.port_b, OperStatus::Down);
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove_node(&mut self, node_id: &str) -> bool {
+        let link_ids: Vec<String> = self
+            .links
+            .iter()
+            .filter(|l| l.node_a == node_id || l.node_b == node_id)
+            .map(|l| l.id.clone())
+            .collect();
+
+        for lid in link_ids {
+            self.remove_link(&lid);
+        }
+
+        self.nodes.remove(node_id).is_some()
+    }
+
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.links.clear();
+        self.event_queue.clear();
+        self.event_counter = 0;
+        self.current_time = 0;
     }
 
     fn find_connected_peer(&self, node_id: &str, port: &str) -> Option<(String, String, SimTime)> {
@@ -673,6 +835,114 @@ mod tests {
         let processed = sim.run_until_idle(50);
         assert!(processed.len() >= 8, "Expected at least 8 events for routed ping, got {}", processed.len());
 
+        let last_event = processed.last().unwrap();
+        assert_eq!(last_event.target_node, "pc1");
+        assert!(last_event.decision_log.iter().any(|msg| msg.contains("PING SUCCESSFUL")));
+    }
+
+    #[test]
+    fn test_inter_vlan_router_on_a_stick_with_8021q() {
+        let mut sim = NetworkSimulation::new();
+
+        // 1. PC1 on VLAN 10: 192.168.10.10/24, gateway 192.168.10.1
+        let mut pc1 = DeviceState::new("pc1", "PC1", DeviceType::Host);
+        let mut iface1 = Interface::new("eth0", MacAddress([0x00, 0x11, 0x22, 0x33, 0x10, 0x10]));
+        iface1.set_admin_status(AdminStatus::Up);
+        pc1.add_interface(iface1);
+        pc1.set_interface_ip("eth0", Some("192.168.10.10/24".parse().unwrap())).unwrap();
+        pc1.routing_table.add_route(routecraft_core::Route::new_static(
+            "0.0.0.0/0".parse().unwrap(),
+            Some(Ipv4Addr::new(192, 168, 10, 1)),
+            "eth0",
+            1,
+        ));
+        sim.add_node(pc1);
+
+        // 2. PC2 on VLAN 20: 192.168.20.20/24, gateway 192.168.20.1
+        let mut pc2 = DeviceState::new("pc2", "PC2", DeviceType::Host);
+        let mut iface2 = Interface::new("eth0", MacAddress([0x00, 0x11, 0x22, 0x33, 0x20, 0x20]));
+        iface2.set_admin_status(AdminStatus::Up);
+        pc2.add_interface(iface2);
+        pc2.set_interface_ip("eth0", Some("192.168.20.20/24".parse().unwrap())).unwrap();
+        pc2.routing_table.add_route(routecraft_core::Route::new_static(
+            "0.0.0.0/0".parse().unwrap(),
+            Some(Ipv4Addr::new(192, 168, 20, 1)),
+            "eth0",
+            1,
+        ));
+        sim.add_node(pc2);
+
+        // 3. Switch SW1:
+        // Fa0/1 = Access VLAN 10
+        // Fa0/2 = Access VLAN 20
+        // Fa0/3 = Trunk (allows VLAN 10 and 20)
+        let mut sw1 = DeviceState::new("sw1", "Switch1", DeviceType::Switch);
+        let mut sw_p1 = Interface::new("FastEthernet0/1", MacAddress([0x00, 0xaa, 0xbb, 0x01, 0x01, 0x01]));
+        sw_p1.set_admin_status(AdminStatus::Up);
+        sw_p1.switchport_mode = SwitchportMode::Access(10);
+
+        let mut sw_p2 = Interface::new("FastEthernet0/2", MacAddress([0x00, 0xaa, 0xbb, 0x01, 0x01, 0x02]));
+        sw_p2.set_admin_status(AdminStatus::Up);
+        sw_p2.switchport_mode = SwitchportMode::Access(20);
+
+        let mut sw_p3 = Interface::new("FastEthernet0/3", MacAddress([0x00, 0xaa, 0xbb, 0x01, 0x01, 0x03]));
+        sw_p3.set_admin_status(AdminStatus::Up);
+        sw_p3.switchport_mode = SwitchportMode::Trunk {
+            native_vlan: 1,
+            allowed_vlans: vec![10, 20],
+        };
+
+        sw1.add_interface(sw_p1);
+        sw1.add_interface(sw_p2);
+        sw1.add_interface(sw_p3);
+        sim.add_node(sw1);
+
+        // 4. Router R1 (Router-on-a-stick):
+        // Physical Gi0/0 (admin up, no IP)
+        // Subinterface Gi0/0.10: encapsulation dot1q 10, IP 192.168.10.1/24
+        // Subinterface Gi0/0.20: encapsulation dot1q 20, IP 192.168.20.1/24
+        let mut r1 = DeviceState::new("r1", "Router1", DeviceType::Router);
+        let mut r_phys = Interface::new("GigabitEthernet0/0", MacAddress([0x00, 0xaa, 0xbb, 0xcc, 0x00, 0x01]));
+        r_phys.set_admin_status(AdminStatus::Up);
+        r1.add_interface(r_phys);
+
+        let mut sub10 = Interface::new("GigabitEthernet0/0.10", MacAddress([0x00, 0xaa, 0xbb, 0xcc, 0x00, 0x01]));
+        sub10.set_admin_status(AdminStatus::Up);
+        sub10.oper_status = OperStatus::Up;
+        sub10.encapsulation_vlan = Some(10);
+        r1.add_interface(sub10);
+        r1.set_interface_ip("GigabitEthernet0/0.10", Some("192.168.10.1/24".parse().unwrap())).unwrap();
+
+        let mut sub20 = Interface::new("GigabitEthernet0/0.20", MacAddress([0x00, 0xaa, 0xbb, 0xcc, 0x00, 0x01]));
+        sub20.set_admin_status(AdminStatus::Up);
+        sub20.oper_status = OperStatus::Up;
+        sub20.encapsulation_vlan = Some(20);
+        r1.add_interface(sub20);
+        r1.set_interface_ip("GigabitEthernet0/0.20", Some("192.168.20.1/24".parse().unwrap())).unwrap();
+
+        sim.add_node(r1);
+
+        // Cabling:
+        // PC1:eth0 <-> SW1:Fa0/1
+        // PC2:eth0 <-> SW1:Fa0/2
+        // SW1:Fa0/3 <-> R1:Gi0/0
+        sim.add_link("link1", "pc1", "eth0", "sw1", "FastEthernet0/1", 5);
+        sim.add_link("link2", "pc2", "eth0", "sw1", "FastEthernet0/2", 5);
+        sim.add_link("link3", "sw1", "FastEthernet0/3", "r1", "GigabitEthernet0/0", 5);
+
+        // Ping from PC1 (192.168.10.10, VLAN 10) to PC2 (192.168.20.20, VLAN 20)
+        sim.trigger_ping("pc1", Ipv4Addr::new(192, 168, 20, 20));
+
+        let processed = sim.run_until_idle(50);
+        assert!(processed.len() >= 8, "Expected router-on-a-stick events, got {}", processed.len());
+
+        // Verify that PC1's initial ARP broadcast did NOT reach PC2 (VLAN 10 vs VLAN 20 isolation!)
+        let pc2_got_arp_from_pc1 = processed.iter().any(|ev| {
+            ev.target_node == "pc2" && ev.source_node == "sw1" && ev.frame.to_string().contains("Who has 192.168.10.1")
+        });
+        assert!(!pc2_got_arp_from_pc1, "VLAN isolation failed: PC2 received broadcast from VLAN 10!");
+
+        // Verify final ping success
         let last_event = processed.last().unwrap();
         assert_eq!(last_event.target_node, "pc1");
         assert!(last_event.decision_log.iter().any(|msg| msg.contains("PING SUCCESSFUL")));

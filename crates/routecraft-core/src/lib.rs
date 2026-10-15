@@ -8,9 +8,9 @@ pub mod mac_table;
 pub mod routing_table;
 
 pub use arp_table::{ArpEntry, ArpTable};
-pub use device::{DeviceState, DeviceType};
+pub use device::{DeviceState, DeviceType, Vlan};
 pub use error::DeviceError;
-pub use interface::{AdminStatus, Duplex, Interface, OperStatus};
+pub use interface::{AdminStatus, Duplex, Interface, OperStatus, SwitchportMode};
 pub use ip::{mask_to_prefix_len, prefix_len_to_mask, Ipv4Cidr};
 pub use mac::MacAddress;
 pub use mac_table::{MacTable, MacTableEntry};

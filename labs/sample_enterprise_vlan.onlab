@@ -1,0 +1,249 @@
+{
+  "version": "1.0.0",
+  "title": "Enterprise 802.1Q Inter-VLAN Routing Lab",
+  "description": "Cisco Router-on-a-Stick setup with 802.1Q trunking and isolated sales/engineering VLANs",
+  "nodes": [
+    {
+      "id": "r1",
+      "hostname": "Core-Router",
+      "device_type": "Router",
+      "interfaces": {
+        "Gi0/0": {
+          "name": "Gi0/0",
+          "mac_address": "00:aa:bb:cc:00:01",
+          "ipv4_address": null,
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": "Routed",
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Trunk Link to Core-Switch"
+        },
+        "Gi0/0.10": {
+          "name": "Gi0/0.10",
+          "mac_address": "00:aa:bb:cc:00:10",
+          "ipv4_address": "192.168.10.1/24",
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": "Routed",
+          "encapsulation_vlan": 10,
+          "parent_interface": "Gi0/0",
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Default Gateway for VLAN 10 (Sales)"
+        },
+        "Gi0/0.20": {
+          "name": "Gi0/0.20",
+          "mac_address": "00:aa:bb:cc:00:20",
+          "ipv4_address": "192.168.20.1/24",
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": "Routed",
+          "encapsulation_vlan": 20,
+          "parent_interface": "Gi0/0",
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Default Gateway for VLAN 20 (Engineering)"
+        }
+      },
+      "vlans": {},
+      "mac_table": [],
+      "arp_table": [],
+      "routing_table": [
+        {
+          "destination": "192.168.10.0/24",
+          "next_hop": null,
+          "interface": "Gi0/0.10",
+          "metric": 0,
+          "route_type": "Connected"
+        },
+        {
+          "destination": "192.168.20.0/24",
+          "next_hop": null,
+          "interface": "Gi0/0.20",
+          "metric": 0,
+          "route_type": "Connected"
+        }
+      ]
+    },
+    {
+      "id": "sw1",
+      "hostname": "Distribution-Switch",
+      "device_type": "Switch",
+      "interfaces": {
+        "Fa0/1": {
+          "name": "Fa0/1",
+          "mac_address": "00:aa:bb:cc:dd:01",
+          "ipv4_address": null,
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": {
+            "Trunk": {
+              "native_vlan": 1,
+              "allowed_vlans": [10, 20]
+            }
+          },
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Trunk to Core-Router Gi0/0"
+        },
+        "Fa0/2": {
+          "name": "Fa0/2",
+          "mac_address": "00:aa:bb:cc:dd:02",
+          "ipv4_address": null,
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": {
+            "Access": 10
+          },
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Access VLAN 10 (Sales)"
+        },
+        "Fa0/3": {
+          "name": "Fa0/3",
+          "mac_address": "00:aa:bb:cc:dd:03",
+          "ipv4_address": null,
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": {
+            "Access": 20
+          },
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": "Access VLAN 20 (Engineering)"
+        }
+      },
+      "vlans": {
+        "10": { "id": 10, "name": "Sales" },
+        "20": { "id": 20, "name": "Engineering" }
+      },
+      "mac_table": [],
+      "arp_table": [],
+      "routing_table": []
+    },
+    {
+      "id": "pc1",
+      "hostname": "PC-Sales-01",
+      "device_type": "Host",
+      "interfaces": {
+        "eth0": {
+          "name": "eth0",
+          "mac_address": "00:11:22:33:44:10",
+          "ipv4_address": "192.168.10.10/24",
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": "Routed",
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": null
+        }
+      },
+      "vlans": {},
+      "mac_table": [],
+      "arp_table": [],
+      "routing_table": [
+        {
+          "destination": "192.168.10.0/24",
+          "next_hop": null,
+          "interface": "eth0",
+          "metric": 0,
+          "route_type": "Connected"
+        },
+        {
+          "destination": "0.0.0.0/0",
+          "next_hop": "192.168.10.1",
+          "interface": "eth0",
+          "metric": 1,
+          "route_type": "Static"
+        }
+      ]
+    },
+    {
+      "id": "pc2",
+      "hostname": "PC-Eng-02",
+      "device_type": "Host",
+      "interfaces": {
+        "eth0": {
+          "name": "eth0",
+          "mac_address": "00:11:22:33:44:20",
+          "ipv4_address": "192.168.20.20/24",
+          "admin_status": "Up",
+          "oper_status": "Up",
+          "mtu": 1500,
+          "switchport_mode": "Routed",
+          "encapsulation_vlan": null,
+          "parent_interface": null,
+          "speed_mbps": 1000,
+          "duplex": "Full",
+          "description": null
+        }
+      },
+      "vlans": {},
+      "mac_table": [],
+      "arp_table": [],
+      "routing_table": [
+        {
+          "destination": "192.168.20.0/24",
+          "next_hop": null,
+          "interface": "eth0",
+          "metric": 0,
+          "route_type": "Connected"
+        },
+        {
+          "destination": "0.0.0.0/0",
+          "next_hop": "192.168.20.1",
+          "interface": "eth0",
+          "metric": 1,
+          "route_type": "Static"
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": "link_trunk",
+      "node_a": "r1",
+      "port_a": "Gi0/0",
+      "node_b": "sw1",
+      "port_b": "Fa0/1",
+      "latency_ms": 5,
+      "is_connected": true
+    },
+    {
+      "id": "link_vlan10",
+      "node_a": "sw1",
+      "port_a": "Fa0/2",
+      "node_b": "pc1",
+      "port_b": "eth0",
+      "latency_ms": 5,
+      "is_connected": true
+    },
+    {
+      "id": "link_vlan20",
+      "node_a": "sw1",
+      "port_a": "Fa0/3",
+      "node_b": "pc2",
+      "port_b": "eth0",
+      "latency_ms": 5,
+      "is_connected": true
+    }
+  ]
+}

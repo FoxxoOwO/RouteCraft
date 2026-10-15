@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
-import { Play, Pause, StepForward, Send, Zap } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Play, Pause, StepForward, Send, Zap, Download, Upload } from 'lucide-react';
 import { NodeModel } from '../types/simulation';
 
 interface Props {
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStep: () => void;
-  onReset: (preset: 'basic' | 'routed') => void;
+  onReset: (preset: 'basic' | 'routed' | 'vlan') => void;
   onTriggerPing: (srcNodeId: string, targetIp: string) => void;
+  onExportTopology: () => void;
+  onImportTopology: (jsonStr: string) => void;
   pendingEventCount: number;
   nodes: NodeModel[];
 }
@@ -18,11 +20,14 @@ export const SimulationControls: React.FC<Props> = ({
   onStep,
   onReset,
   onTriggerPing,
+  onExportTopology,
+  onImportTopology,
   pendingEventCount,
   nodes,
 }) => {
   const [selectedSrc, setSelectedSrc] = useState(nodes[0]?.id || 'pc1');
   const [targetIp, setTargetIp] = useState('192.168.1.20');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +36,25 @@ export const SimulationControls: React.FC<Props> = ({
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        onImportTopology(content);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset input
+  };
+
   return (
-    <div className="h-14 bg-[#0F172A] border-b border-gray-800 px-4 flex items-center justify-between z-10">
+    <div className="h-14 bg-[#0F172A] border-b border-gray-800 px-4 flex items-center justify-between z-10 gap-3">
       {/* Brand & Preset Loader */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center font-bold text-white shadow-md shadow-blue-500/20">
             RC
@@ -52,19 +72,51 @@ export const SimulationControls: React.FC<Props> = ({
         {/* Presets */}
         <div className="h-6 w-px bg-gray-800 mx-1" />
         <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-slate-400 font-medium">Topologies:</span>
+          <span className="text-slate-400 font-medium">Labs:</span>
           <button
             onClick={() => onReset('basic')}
             className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors"
           >
-            L2 Switch Network
+            L2 Switch
           </button>
           <button
             onClick={() => onReset('routed')}
             className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors"
           >
-            L3 Router Network
+            L3 Router
           </button>
+          <button
+            onClick={() => onReset('vlan')}
+            className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900 text-purple-200 border border-purple-800/60 rounded-md font-medium text-xs transition-colors"
+          >
+            802.1Q Inter-VLAN
+          </button>
+        </div>
+
+        {/* Export / Import */}
+        <div className="h-6 w-px bg-gray-800 mx-1" />
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onExportTopology}
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-gray-800 rounded-lg transition-colors"
+            title="Export Topology (.onlab / JSON)"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-gray-800 rounded-lg transition-colors"
+            title="Import Topology (.onlab / JSON)"
+          >
+            <Upload className="w-4 h-4" />
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".onlab,.json"
+            className="hidden"
+          />
         </div>
       </div>
 
@@ -127,7 +179,7 @@ export const SimulationControls: React.FC<Props> = ({
           type="text"
           value={targetIp}
           onChange={(e) => setTargetIp(e.target.value)}
-          placeholder="192.168.1.20"
+          placeholder="IP Address"
           className="bg-gray-800 border border-gray-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs w-28 font-mono outline-none"
         />
 

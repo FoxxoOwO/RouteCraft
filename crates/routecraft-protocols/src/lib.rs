@@ -26,11 +26,18 @@ impl TryFrom<u16> for EtherType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dot1qTag {
+    pub priority: u8,
+    pub vlan_id: u16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EthernetFrame {
     pub dst_mac: MacAddress,
     pub src_mac: MacAddress,
     pub ethertype: EtherType,
+    pub vlan_tag: Option<Dot1qTag>,
     pub payload: PacketPayload,
 }
 
@@ -98,11 +105,26 @@ pub struct IcmpPacket {
 }
 
 impl EthernetFrame {
+    pub fn with_vlan(mut self, vlan_id: u16) -> Self {
+        self.vlan_tag = Some(Dot1qTag { priority: 0, vlan_id });
+        self
+    }
+
+    pub fn untagged(mut self) -> Self {
+        self.vlan_tag = None;
+        self
+    }
+
+    pub fn effective_vlan(&self) -> u16 {
+        self.vlan_tag.map(|t| t.vlan_id).unwrap_or(1)
+    }
+
     pub fn new_arp_request(src_mac: MacAddress, sender_ip: Ipv4Addr, target_ip: Ipv4Addr) -> Self {
         Self {
             dst_mac: MacAddress::BROADCAST,
             src_mac,
             ethertype: EtherType::Arp,
+            vlan_tag: None,
             payload: PacketPayload::Arp(ArpPacket {
                 operation: ArpOperation::Request,
                 sender_mac: src_mac,
@@ -123,6 +145,7 @@ impl EthernetFrame {
             dst_mac,
             src_mac,
             ethertype: EtherType::Arp,
+            vlan_tag: None,
             payload: PacketPayload::Arp(ArpPacket {
                 operation: ArpOperation::Reply,
                 sender_mac: src_mac,
@@ -145,6 +168,7 @@ impl EthernetFrame {
             dst_mac,
             src_mac,
             ethertype: EtherType::Ipv4,
+            vlan_tag: None,
             payload: PacketPayload::Ipv4(Ipv4Packet {
                 src_ip,
                 dst_ip,
@@ -174,6 +198,7 @@ impl EthernetFrame {
             dst_mac,
             src_mac,
             ethertype: EtherType::Ipv4,
+            vlan_tag: None,
             payload: PacketPayload::Ipv4(Ipv4Packet {
                 src_ip,
                 dst_ip,
@@ -193,11 +218,19 @@ impl EthernetFrame {
 
 impl fmt::Display for EthernetFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Eth [{} -> {} | {:?}]",
-            self.src_mac, self.dst_mac, self.ethertype
-        )?;
+        if let Some(tag) = self.vlan_tag {
+            write!(
+                f,
+                "Eth [{} -> {} | 802.1Q VLAN {} | {:?}]",
+                self.src_mac, self.dst_mac, tag.vlan_id, self.ethertype
+            )?;
+        } else {
+            write!(
+                f,
+                "Eth [{} -> {} | {:?}]",
+                self.src_mac, self.dst_mac, self.ethertype
+            )?;
+        }
         match &self.payload {
             PacketPayload::Arp(arp) => write!(
                 f,

@@ -1,6 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { NodeModel, LinkModel, SimEventModel } from '../types/simulation';
-import { Network, Server, Monitor, Activity } from 'lucide-react';
+import {
+  Network,
+  Server,
+  Monitor,
+  Activity,
+  Plus,
+  Cable,
+  Scissors,
+  Trash2,
+  AlertTriangle,
+} from 'lucide-react';
 
 interface Props {
   nodes: NodeModel[];
@@ -10,6 +20,11 @@ interface Props {
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   activePacket: SimEventModel | null;
+  onAddNode: (type: 'router' | 'switch' | 'host') => void;
+  onDeleteNode: (id: string) => void;
+  onConnectLink: (nodeA: string, portA: string, nodeB: string, portB: string) => void;
+  onToggleLink: (linkId: string, connected: boolean) => void;
+  onDeleteLink: (linkId: string) => void;
 }
 
 export const TopologyCanvas: React.FC<Props> = ({
@@ -20,13 +35,32 @@ export const TopologyCanvas: React.FC<Props> = ({
   selectedNodeId,
   onSelectNode,
   activePacket,
+  onAddNode,
+  onDeleteNode,
+  onConnectLink,
+  onToggleLink,
+  onDeleteLink,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
+  // Cable creation state
+  const [isCableToolActive, setIsCableToolActive] = useState(false);
+  const [cableSource, setCableSource] = useState<{ nodeId: string; port: string } | null>(null);
+  const [portSelectNode, setPortSelectNode] = useState<NodeModel | null>(null);
+
   const handleMouseDown = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+
+    if (isCableToolActive) {
+      const node = nodes.find((n) => n.id === id);
+      if (node) {
+        setPortSelectNode(node);
+      }
+      return;
+    }
+
     const pos = nodePositions[id] || { x: 100, y: 100 };
     setDraggingId(id);
     setDragOffset({
@@ -39,13 +73,36 @@ export const TopologyCanvas: React.FC<Props> = ({
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!draggingId || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
-    const newX = Math.max(50, Math.min(rect.width - 100, e.clientX - dragOffset.x));
-    const newY = Math.max(50, Math.min(rect.height - 100, e.clientY - dragOffset.y));
+    const newX = Math.max(40, Math.min(rect.width - 120, e.clientX - dragOffset.x));
+    const newY = Math.max(40, Math.min(rect.height - 120, e.clientY - dragOffset.y));
     onUpdatePosition(draggingId, newX, newY);
   };
 
   const handleMouseUp = () => {
     setDraggingId(null);
+  };
+
+  const handlePortSelect = (portName: string) => {
+    if (!portSelectNode) return;
+
+    if (!cableSource) {
+      // First endpoint selected
+      setCableSource({ nodeId: portSelectNode.id, port: portName });
+      setPortSelectNode(null);
+    } else {
+      // Second endpoint selected -> connect!
+      if (cableSource.nodeId === portSelectNode.id) {
+        // Can't connect to same node
+        alert('Cannot connect a cable to the same device!');
+        setPortSelectNode(null);
+        return;
+      }
+
+      onConnectLink(cableSource.nodeId, cableSource.port, portSelectNode.id, portName);
+      setCableSource(null);
+      setPortSelectNode(null);
+      setIsCableToolActive(false);
+    }
   };
 
   const getNodeIcon = (type: string) => {
@@ -63,33 +120,132 @@ export const TopologyCanvas: React.FC<Props> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-[#0B0F19] overflow-hidden select-none cursor-default"
+      className={`relative w-full h-full bg-[#0B0F19] overflow-hidden select-none cursor-default ${
+        isCableToolActive ? 'cursor-crosshair' : ''
+      }`}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onClick={() => onSelectNode('')}
+      onClick={() => {
+        if (!isCableToolActive) onSelectNode('');
+      }}
       style={{
         backgroundImage: `radial-gradient(circle, #1F2937 1px, transparent 1px)`,
         backgroundSize: '24px 24px',
       }}
     >
+      {/* Floating Canvas Toolbar */}
+      <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#111827]/90 backdrop-blur-md p-1.5 rounded-xl border border-gray-800 shadow-xl">
+        {/* Add Nodes */}
+        <div className="flex items-center gap-1 border-r border-gray-800 pr-2">
+          <button
+            onClick={() => onAddNode('router')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-cyan-950/60 hover:text-cyan-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
+            title="Add Router"
+          >
+            <Plus className="w-3.5 h-3.5 text-cyan-400" />
+            <Network className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Router</span>
+          </button>
+
+          <button
+            onClick={() => onAddNode('switch')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-indigo-950/60 hover:text-indigo-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
+            title="Add Switch"
+          >
+            <Plus className="w-3.5 h-3.5 text-indigo-400" />
+            <Server className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Switch</span>
+          </button>
+
+          <button
+            onClick={() => onAddNode('host')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-emerald-950/60 hover:text-emerald-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
+            title="Add PC Host"
+          >
+            <Plus className="w-3.5 h-3.5 text-emerald-400" />
+            <Monitor className="w-3.5 h-3.5 text-emerald-400" />
+            <span>PC</span>
+          </button>
+        </div>
+
+        {/* Cable Connection Tool */}
+        <button
+          onClick={() => {
+            setIsCableToolActive(!isCableToolActive);
+            setCableSource(null);
+            setPortSelectNode(null);
+          }}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${
+            isCableToolActive
+              ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/20'
+              : 'bg-[#1E293B] hover:bg-gray-800 text-slate-200 border-gray-700/60'
+          }`}
+          title="Connect Cable between devices"
+        >
+          <Cable className="w-3.5 h-3.5" />
+          <span>{isCableToolActive ? (cableSource ? 'Select 2nd Device' : 'Select 1st Device') : 'Add Cable'}</span>
+        </button>
+
+        {/* Delete Selected Node */}
+        {selectedNodeId && (
+          <button
+            onClick={() => onDeleteNode(selectedNodeId)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/50 hover:bg-rose-900 text-rose-300 text-xs font-semibold rounded-lg transition-colors border border-rose-800/60"
+            title="Delete Selected Device"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Device</span>
+          </button>
+        )}
+      </div>
+
+      {/* Cable Tool Instruction Banner */}
+      {isCableToolActive && (
+        <div className="absolute top-16 left-4 z-20 bg-amber-950/80 border border-amber-700/60 text-amber-200 text-xs px-3 py-1.5 rounded-lg flex items-center gap-2 backdrop-blur-md">
+          <AlertTriangle className="w-4 h-4 text-amber-400" />
+          <span>
+            {cableSource
+              ? `Cable source set to ${cableSource.nodeId}:${cableSource.port}. Click destination device.`
+              : 'Cable Tool Active: Click first device to choose port.'}
+          </span>
+          <button
+            onClick={() => {
+              setIsCableToolActive(false);
+              setCableSource(null);
+              setPortSelectNode(null);
+            }}
+            className="ml-2 text-xs underline hover:text-white"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       {/* SVG Link Layer */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none">
         {links.map((link) => {
           const posA = nodePositions[link.node_a] || { x: 100, y: 100 };
           const posB = nodePositions[link.node_b] || { x: 300, y: 100 };
 
-          // Offset to center of node (node is 80x80)
           const x1 = posA.x + 40;
           const y1 = posA.y + 40;
           const x2 = posB.x + 40;
           const y2 = posB.y + 40;
 
-          // Compute midpoint for port labels
-          const midX = (x1 + x2) / 2;
-          const midY = (y1 + y2) / 2;
-
           return (
             <g key={link.id}>
+              {/* Invisible clickable hit area */}
+              <line
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="transparent"
+                strokeWidth={20}
+                className="cursor-pointer pointer-events-auto"
+                onClick={() => onToggleLink(link.id, !link.is_connected)}
+              />
+
               {/* Cable line */}
               <line
                 x1={x1}
@@ -98,7 +254,7 @@ export const TopologyCanvas: React.FC<Props> = ({
                 y2={y2}
                 stroke={link.is_connected ? '#374151' : '#EF4444'}
                 strokeWidth={link.is_connected ? 3 : 2}
-                strokeDasharray={link.is_connected ? undefined : '5,5'}
+                strokeDasharray={link.is_connected ? undefined : '6,6'}
               />
 
               {/* Status glow if active */}
@@ -113,18 +269,6 @@ export const TopologyCanvas: React.FC<Props> = ({
                   strokeOpacity={0.6}
                 />
               )}
-
-              {/* Link ports label */}
-              <text
-                x={midX}
-                y={midY - 8}
-                fill="#9CA3AF"
-                fontSize={10}
-                textAnchor="middle"
-                className="font-mono select-none"
-              >
-                {link.port_a} ↔ {link.port_b}
-              </text>
             </g>
           );
         })}
@@ -159,17 +303,68 @@ export const TopologyCanvas: React.FC<Props> = ({
                 strokeDasharray="8 8"
                 className="animate-pulse"
               />
-              <circle cx={x2} cy={y2} r={12} fill={color} fillOpacity={0.4} />
+              <circle cx={x2} cy={y2} r={14} fill={color} fillOpacity={0.4} />
               <circle cx={x2} cy={y2} r={6} fill={color} />
             </g>
           );
         })()}
       </svg>
 
+      {/* Link Badges & Interactive Controls Layer */}
+      {links.map((link) => {
+        const posA = nodePositions[link.node_a] || { x: 100, y: 100 };
+        const posB = nodePositions[link.node_b] || { x: 300, y: 100 };
+        const midX = (posA.x + 40 + posB.x + 40) / 2;
+        const midY = (posA.y + 40 + posB.y + 40) / 2;
+
+        return (
+          <div
+            key={link.id}
+            style={{
+              transform: `translate(${midX - 60}px, ${midY - 14}px)`,
+            }}
+            className="absolute z-10 flex items-center gap-1 bg-[#0F172A]/90 border border-gray-800 rounded-lg px-2 py-0.5 shadow-md text-[10px] font-mono text-slate-300"
+          >
+            <span className={link.is_connected ? 'text-slate-300' : 'text-rose-400 line-through'}>
+              {link.port_a} ↔ {link.port_b}
+            </span>
+
+            {/* Toggle / Sever Cable (Fault Injection) Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleLink(link.id, !link.is_connected);
+              }}
+              className={`p-0.5 rounded transition-colors ${
+                link.is_connected
+                  ? 'text-slate-400 hover:text-rose-400 hover:bg-rose-950/50'
+                  : 'text-rose-400 hover:text-emerald-400 hover:bg-emerald-950/50'
+              }`}
+              title={link.is_connected ? 'Sever / Cut Cable (Fault Injection)' : 'Reconnect Cable'}
+            >
+              <Scissors className="w-3 h-3" />
+            </button>
+
+            {/* Delete Link Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDeleteLink(link.id);
+              }}
+              className="p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-gray-800"
+              title="Delete Link"
+            >
+              <Trash2 className="w-2.5 h-2.5" />
+            </button>
+          </div>
+        );
+      })}
+
       {/* Nodes Layer */}
       {nodes.map((node) => {
         const pos = nodePositions[node.id] || { x: 100, y: 100 };
         const isSelected = selectedNodeId === node.id;
+        const isCableSource = cableSource?.nodeId === node.id;
 
         return (
           <div
@@ -178,15 +373,16 @@ export const TopologyCanvas: React.FC<Props> = ({
             style={{
               transform: `translate(${pos.x}px, ${pos.y}px)`,
             }}
-            className={`absolute w-20 h-20 rounded-xl flex flex-col items-center justify-center cursor-move transition-shadow duration-150 ${
-              isSelected
+            className={`absolute w-20 h-20 rounded-xl flex flex-col items-center justify-center cursor-move transition-all duration-150 ${
+              isCableSource
+                ? 'bg-amber-950/80 border-2 border-amber-400 shadow-xl shadow-amber-500/30'
+                : isSelected
                 ? 'bg-[#1E293B] border-2 border-blue-500 shadow-lg shadow-blue-500/20'
                 : 'bg-[#111827] border border-gray-700/80 hover:border-gray-500'
             }`}
           >
             <div className="relative">
               {getNodeIcon(node.device_type)}
-              {/* Online indicator dot */}
               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-[#111827]" />
             </div>
 
@@ -194,7 +390,6 @@ export const TopologyCanvas: React.FC<Props> = ({
               {node.hostname}
             </span>
 
-            {/* Sub-label for primary IP or type */}
             <span className="text-[9px] text-slate-400 font-mono truncate max-w-[70px]">
               {node.interfaces[0]?.ip ? node.interfaces[0].ip.split('/')[0] : node.device_type}
             </span>
@@ -202,11 +397,62 @@ export const TopologyCanvas: React.FC<Props> = ({
         );
       })}
 
+      {/* Port Selection Dialog for Cable Connection */}
+      {portSelectNode && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-gray-700 rounded-xl p-5 shadow-2xl max-w-sm w-full">
+            <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 mb-1">
+              <Cable className="w-4 h-4 text-amber-400" />
+              Select Port on {portSelectNode.hostname}
+            </h3>
+            <p className="text-xs text-slate-400 mb-4">
+              Choose the interface to attach the cable to:
+            </p>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+              {portSelectNode.interfaces.map((iface) => {
+                // Check if already used by another link
+                const isUsed = links.some(
+                  (l) =>
+                    (l.node_a === portSelectNode.id && l.port_a === iface.name) ||
+                    (l.node_b === portSelectNode.id && l.port_b === iface.name)
+                );
+
+                return (
+                  <button
+                    key={iface.name}
+                    disabled={isUsed}
+                    onClick={() => handlePortSelect(iface.name)}
+                    className={`w-full px-3 py-2 rounded-lg text-left text-xs font-mono flex items-center justify-between border transition-colors ${
+                      isUsed
+                        ? 'opacity-40 bg-gray-900 border-gray-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-[#1E293B] hover:bg-blue-900/40 hover:border-blue-500 border-gray-700 text-slate-200'
+                    }`}
+                  >
+                    <span className="font-semibold">{iface.name}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {isUsed ? 'Connected' : iface.ip || 'Available'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setPortSelectNode(null)}
+              className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Canvas Watermark / Hint */}
       <div className="absolute bottom-4 left-4 pointer-events-none text-xs text-slate-500 font-mono">
         <p className="flex items-center gap-1.5">
           <Activity className="w-3.5 h-3.5 text-blue-400" />
-          RouteCraft Wasm DES Engine • Click device to open CLI / Tables
+          RouteCraft Wasm Engine • Click cable scissors to inject fault • Click node to open CLI
         </p>
       </div>
     </div>

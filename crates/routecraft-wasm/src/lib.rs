@@ -4,13 +4,61 @@ use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use routecraft_core::{
-    AdminStatus, DeviceState, DeviceType, Interface, MacAddress,
+    AdminStatus, DeviceState, DeviceType, Interface, MacAddress, SwitchportMode,
 };
-use routecraft_protocols::PacketPayload;
-use routecraft_engine::NetworkSimulation;
+use routecraft_protocols::{EthernetFrame, Ipv4Payload, PacketPayload};
+use routecraft_engine::{NetworkSimulation, SimLink};
 use routecraft_cli::{CiscoCliEngine, CliEngine, MikroTikCliEngine};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsVlanTagDetails {
+    pub vlan_id: u16,
+    pub priority: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsEthernetDetails {
+    pub src_mac: String,
+    pub dst_mac: String,
+    pub ethertype: String,
+    pub vlan_tag: Option<JsVlanTagDetails>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsArpDetails {
+    pub operation: String,
+    pub sender_mac: String,
+    pub sender_ip: String,
+    pub target_mac: String,
+    pub target_ip: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsIpv4Details {
+    pub src_ip: String,
+    pub dst_ip: String,
+    pub protocol: String,
+    pub ttl: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsIcmpDetails {
+    pub icmp_type: String,
+    pub code: u8,
+    pub identifier: u16,
+    pub sequence_number: u16,
+    pub data_len: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsPduDetails {
+    pub ethernet: JsEthernetDetails,
+    pub arp: Option<JsArpDetails>,
+    pub ipv4: Option<JsIpv4Details>,
+    pub icmp: Option<JsIcmpDetails>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsSimEvent {
     pub id: u64,
     pub time: u64,
@@ -21,18 +69,21 @@ pub struct JsSimEvent {
     pub summary: String,
     pub protocol: String,
     pub decision_log: Vec<String>,
+    pub pdu: Option<JsPduDetails>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsInterface {
     pub name: String,
     pub mac: String,
     pub ip: Option<String>,
     pub admin_status: String,
     pub oper_status: String,
+    pub switchport_mode: String,
+    pub encapsulation_vlan: Option<u16>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsNode {
     pub id: String,
     pub hostname: String,
@@ -40,7 +91,7 @@ pub struct JsNode {
     pub interfaces: Vec<JsInterface>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsLink {
     pub id: String,
     pub node_a: String,
@@ -51,27 +102,27 @@ pub struct JsLink {
     pub is_connected: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsTopology {
     pub nodes: Vec<JsNode>,
     pub links: Vec<JsLink>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsMacEntry {
     pub mac: String,
     pub port: String,
     pub vlan: u16,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsArpEntry {
     pub ip: String,
     pub mac: String,
     pub interface: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsRouteEntry {
     pub prefix: String,
     pub next_hop: Option<String>,
@@ -80,18 +131,88 @@ pub struct JsRouteEntry {
     pub route_type: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct JsVlanEntry {
+    pub id: u16,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsNodeTables {
     pub mac_table: Vec<JsMacEntry>,
     pub arp_table: Vec<JsArpEntry>,
     pub routing_table: Vec<JsRouteEntry>,
+    pub vlans: Vec<JsVlanEntry>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsCliResult {
     pub output: String,
     pub prompt: String,
     pub is_exit: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LabExportData {
+    pub version: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub nodes: Vec<DeviceState>,
+    pub links: Vec<SimLink>,
+}
+
+fn build_pdu_details(frame: &EthernetFrame) -> JsPduDetails {
+    let eth = JsEthernetDetails {
+        src_mac: frame.src_mac.to_string(),
+        dst_mac: frame.dst_mac.to_string(),
+        ethertype: format!("{:?} (0x{:04X})", frame.ethertype, frame.ethertype as u16),
+        vlan_tag: frame.vlan_tag.as_ref().map(|tag| JsVlanTagDetails {
+            vlan_id: tag.vlan_id,
+            priority: tag.priority,
+        }),
+    };
+
+    let mut arp_details = None;
+    let mut ipv4_details = None;
+    let mut icmp_details = None;
+
+    match &frame.payload {
+        PacketPayload::Arp(arp) => {
+            arp_details = Some(JsArpDetails {
+                operation: format!("{:?}", arp.operation),
+                sender_mac: arp.sender_mac.to_string(),
+                sender_ip: arp.sender_ip.to_string(),
+                target_mac: arp.target_mac.to_string(),
+                target_ip: arp.target_ip.to_string(),
+            });
+        }
+        PacketPayload::Ipv4(ip) => {
+            ipv4_details = Some(JsIpv4Details {
+                src_ip: ip.src_ip.to_string(),
+                dst_ip: ip.dst_ip.to_string(),
+                protocol: format!("{:?} ({})", ip.protocol, ip.protocol as u8),
+                ttl: ip.ttl,
+            });
+
+            if let Ipv4Payload::Icmp(icmp) = &ip.payload {
+                icmp_details = Some(JsIcmpDetails {
+                    icmp_type: format!("{:?}", icmp.icmp_type),
+                    code: icmp.code,
+                    identifier: icmp.identifier,
+                    sequence_number: icmp.sequence_number,
+                    data_len: icmp.data.len(),
+                });
+            }
+        }
+        PacketPayload::Raw(_) => {}
+    }
+
+    JsPduDetails {
+        ethernet: eth,
+        arp: arp_details,
+        ipv4: ipv4_details,
+        icmp: icmp_details,
+    }
 }
 
 #[wasm_bindgen]
@@ -127,6 +248,12 @@ impl WasmSimulation {
         Ok(())
     }
 
+    pub fn remove_node(&mut self, node_id: &str) -> bool {
+        self.cisco_sessions.remove(node_id);
+        self.mikrotik_sessions.remove(node_id);
+        self.sim.remove_node(node_id)
+    }
+
     pub fn add_interface(
         &mut self,
         node_id: &str,
@@ -143,8 +270,7 @@ impl WasmSimulation {
             m.parse::<MacAddress>()
                 .map_err(|e| JsValue::from_str(&e.to_string()))?
         } else {
-            // Generate deterministic pseudo-MAC based on node and name
-            let hash = (node_id.len() as u8) * 17 + (name.len() as u8);
+            let hash = (node_id.len() as u8).wrapping_mul(17).wrapping_add(name.len() as u8);
             MacAddress([0x52, 0x54, 0x00, 0x12, hash, 0x01])
         };
 
@@ -209,6 +335,10 @@ impl WasmSimulation {
         Ok(())
     }
 
+    pub fn remove_link(&mut self, link_id: &str) -> bool {
+        self.sim.remove_link(link_id)
+    }
+
     pub fn toggle_link(&mut self, link_id: &str, connected: bool) -> Result<bool, JsValue> {
         for link in &mut self.sim.links {
             if link.id == link_id {
@@ -217,6 +347,12 @@ impl WasmSimulation {
             }
         }
         Err(JsValue::from_str("Link not found"))
+    }
+
+    pub fn clear(&mut self) {
+        self.cisco_sessions.clear();
+        self.mikrotik_sessions.clear();
+        self.sim.clear();
     }
 
     pub fn trigger_ping(&mut self, source_node: &str, target_ip_str: &str) -> Result<(), JsValue> {
@@ -250,6 +386,8 @@ impl WasmSimulation {
                 PacketPayload::Raw(raw) => (format!("Raw frame: {} bytes", raw.len()), "RAW".to_string()),
             };
 
+            let pdu = Some(build_pdu_details(&event.frame));
+
             let js_ev = JsSimEvent {
                 id: event.id,
                 time: event.time,
@@ -260,6 +398,7 @@ impl WasmSimulation {
                 summary,
                 protocol: proto,
                 decision_log: event.decision_log,
+                pdu,
             };
 
             serde_wasm_bindgen::to_value(&js_ev)
@@ -274,12 +413,27 @@ impl WasmSimulation {
         for node in self.sim.nodes.values() {
             let mut ifaces = Vec::new();
             for iface in node.state.interfaces.values() {
+                let sw_mode = match &iface.switchport_mode {
+                    SwitchportMode::Access(v) => format!("access (vlan {})", v),
+                    SwitchportMode::Trunk { native_vlan, allowed_vlans } => {
+                        if allowed_vlans.is_empty() {
+                            format!("trunk (native {})", native_vlan)
+                        } else {
+                            let allowed = allowed_vlans.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+                            format!("trunk (native {}, allowed {})", native_vlan, allowed)
+                        }
+                    }
+                    SwitchportMode::Routed => "routed".to_string(),
+                };
+
                 ifaces.push(JsInterface {
                     name: iface.name.clone(),
                     mac: iface.mac_address.to_string(),
                     ip: iface.ipv4_address.map(|c| c.to_string()),
                     admin_status: iface.admin_status.to_string(),
                     oper_status: iface.oper_status.to_string(),
+                    switchport_mode: sw_mode,
+                    encapsulation_vlan: iface.encapsulation_vlan,
                 });
             }
 
@@ -360,10 +514,21 @@ impl WasmSimulation {
             })
             .collect();
 
+        let vlans: Vec<JsVlanEntry> = node
+            .state
+            .vlans
+            .values()
+            .map(|v| JsVlanEntry {
+                id: v.id,
+                name: v.name.clone(),
+            })
+            .collect();
+
         let tables = JsNodeTables {
             mac_table,
             arp_table,
             routing_table,
+            vlans,
         };
 
         serde_wasm_bindgen::to_value(&tables).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -435,5 +600,46 @@ impl WasmSimulation {
             }
             _ => "> ".to_string(),
         }
+    }
+
+    pub fn export_topology_json(&self) -> Result<String, JsValue> {
+        let nodes: Vec<DeviceState> = self.sim.nodes.values().map(|n| n.state.clone()).collect();
+        let export = LabExportData {
+            version: "1.0.0".to_string(),
+            title: Some("RouteCraft Network Topology".to_string()),
+            description: Some("Exported network lab configuration".to_string()),
+            nodes,
+            links: self.sim.links.clone(),
+        };
+        serde_json::to_string_pretty(&export).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn import_topology_json(&mut self, json_str: &str) -> Result<(), JsValue> {
+        let import: LabExportData = serde_json::from_str(json_str)
+            .map_err(|e| JsValue::from_str(&format!("Invalid topology JSON: {}", e)))?;
+
+        self.sim.clear();
+        self.cisco_sessions.clear();
+        self.mikrotik_sessions.clear();
+
+        for node_state in import.nodes {
+            let id = node_state.id.clone();
+            self.sim.add_node(node_state);
+            self.cisco_sessions.insert(id.clone(), CiscoCliEngine::new());
+            self.mikrotik_sessions.insert(id, MikroTikCliEngine::new());
+        }
+
+        for link in import.links {
+            self.sim.add_link(
+                link.id,
+                link.node_a,
+                link.port_a,
+                link.node_b,
+                link.port_b,
+                link.latency_ms,
+            );
+        }
+
+        Ok(())
     }
 }
