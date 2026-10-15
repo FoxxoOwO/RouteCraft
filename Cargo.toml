@@ -5,6 +5,7 @@ members = [
     "crates/routecraft-cli",
     "crates/routecraft-protocols",
     "crates/routecraft-engine",
+    "crates/routecraft-wasm",
 ]
 
 [workspace.package]
