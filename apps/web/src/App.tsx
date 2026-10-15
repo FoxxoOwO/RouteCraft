@@ -6,11 +6,13 @@ import {
   NodeTablesModel,
   CliResultModel,
 } from './types/simulation';
+import { LAB_CHALLENGES, ChallengeDefinition } from './types/challenges';
 import { TopologyCanvas } from './components/TopologyCanvas';
 import { SimulationControls } from './components/SimulationControls';
 import { DecisionLogPanel } from './components/DecisionLogPanel';
 import { DeviceDrawer } from './components/DeviceDrawer';
 import { PduInspectorModal } from './components/PduInspectorModal';
+import { AutoGraderModal } from './components/AutoGraderModal';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -26,6 +28,11 @@ export const App: React.FC = () => {
   const [selectedEventForPdu, setSelectedEventForPdu] = useState<SimEventModel | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+
+  // Challenges & Auto-Grader state
+  const [activeChallenge, setActiveChallenge] = useState<ChallengeDefinition>(LAB_CHALLENGES[0]);
+  const [isGraderModalOpen, setIsGraderModalOpen] = useState(false);
+  const [objectiveResults, setObjectiveResults] = useState<Record<string, boolean>>({});
 
   // Initialize Wasm module
   useEffect(() => {
@@ -412,6 +419,24 @@ export const App: React.FC = () => {
     }
   };
 
+  // Live auto-grader evaluation on topology or events change
+  useEffect(() => {
+    if (!topology || topology.nodes.length === 0) return;
+    try {
+      const results = activeChallenge.evaluator(topology, events);
+      setObjectiveResults(results);
+    } catch (err) {
+      console.error('Error evaluating challenge:', err);
+    }
+  }, [topology, events, activeChallenge]);
+
+  const completedObjectives = activeChallenge.objectives.filter(
+    (o) => objectiveResults[o.id]
+  ).length;
+  const totalObjectives = activeChallenge.objectives.length;
+  const challengePercentage =
+    totalObjectives > 0 ? Math.round((completedObjectives / totalObjectives) * 100) : 0;
+
   const selectedNode = topology.nodes.find((n) => n.id === selectedNodeId) || null;
 
   if (!wasmReady) {
@@ -434,6 +459,12 @@ export const App: React.FC = () => {
         onTriggerPing={handleTriggerPing}
         onExportTopology={handleExportTopology}
         onImportTopology={handleImportTopology}
+        onOpenChallenges={() => setIsGraderModalOpen(true)}
+        challengeProgress={{
+          completed: completedObjectives,
+          total: totalObjectives,
+          percentage: challengePercentage,
+        }}
         pendingEventCount={pendingCount}
         nodes={topology.nodes}
       />
@@ -486,6 +517,19 @@ export const App: React.FC = () => {
           onClose={() => setSelectedEventForPdu(null)}
         />
       )}
+
+      {/* Auto-Grader Lab Challenge Modal */}
+      <AutoGraderModal
+        isOpen={isGraderModalOpen}
+        onClose={() => setIsGraderModalOpen(false)}
+        activeChallengeId={activeChallenge.id}
+        onSelectChallenge={(ch) => {
+          setActiveChallenge(ch);
+          loadPreset(ch.preset);
+        }}
+        objectiveResults={objectiveResults}
+        onResetPreset={(preset) => loadPreset(preset)}
+      />
     </div>
   );
 };

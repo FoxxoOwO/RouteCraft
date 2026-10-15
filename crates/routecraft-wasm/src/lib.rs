@@ -8,7 +8,7 @@ use routecraft_core::{
 };
 use routecraft_protocols::{EthernetFrame, Ipv4Payload, PacketPayload};
 use routecraft_engine::{NetworkSimulation, SimLink};
-use routecraft_cli::{CiscoCliEngine, CliEngine, MikroTikCliEngine};
+use routecraft_cli::{CiscoCliEngine, CliEngine, LinuxCliEngine, MikroTikCliEngine};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct JsVlanTagDetails {
@@ -220,6 +220,7 @@ pub struct WasmSimulation {
     sim: NetworkSimulation,
     cisco_sessions: HashMap<String, CiscoCliEngine>,
     mikrotik_sessions: HashMap<String, MikroTikCliEngine>,
+    linux_sessions: HashMap<String, LinuxCliEngine>,
 }
 
 #[wasm_bindgen]
@@ -230,6 +231,7 @@ impl WasmSimulation {
             sim: NetworkSimulation::new(),
             cisco_sessions: HashMap::new(),
             mikrotik_sessions: HashMap::new(),
+            linux_sessions: HashMap::new(),
         }
     }
 
@@ -245,12 +247,14 @@ impl WasmSimulation {
         self.sim.add_node(state);
         self.cisco_sessions.insert(id.to_string(), CiscoCliEngine::new());
         self.mikrotik_sessions.insert(id.to_string(), MikroTikCliEngine::new());
+        self.linux_sessions.insert(id.to_string(), LinuxCliEngine::new());
         Ok(())
     }
 
     pub fn remove_node(&mut self, node_id: &str) -> bool {
         self.cisco_sessions.remove(node_id);
         self.mikrotik_sessions.remove(node_id);
+        self.linux_sessions.remove(node_id);
         self.sim.remove_node(node_id)
     }
 
@@ -352,6 +356,7 @@ impl WasmSimulation {
     pub fn clear(&mut self) {
         self.cisco_sessions.clear();
         self.mikrotik_sessions.clear();
+        self.linux_sessions.clear();
         self.sim.clear();
     }
 
@@ -565,6 +570,15 @@ impl WasmSimulation {
                 let p = session.prompt(&node.state);
                 (res, p)
             }
+            "linux" => {
+                let session = self
+                    .linux_sessions
+                    .entry(node_id.to_string())
+                    .or_insert_with(LinuxCliEngine::new);
+                let res = session.execute(&mut node.state, command);
+                let p = session.prompt(&node.state);
+                (res, p)
+            }
             _ => return Err(JsValue::from_str("Unsupported vendor")),
         };
 
@@ -598,6 +612,13 @@ impl WasmSimulation {
                     format!("[admin@{}] > ", node.state.hostname)
                 }
             }
+            "linux" => {
+                if let Some(session) = self.linux_sessions.get(node_id) {
+                    session.prompt(&node.state)
+                } else {
+                    format!("root@{}:~# ", node.state.hostname)
+                }
+            }
             _ => "> ".to_string(),
         }
     }
@@ -621,12 +642,14 @@ impl WasmSimulation {
         self.sim.clear();
         self.cisco_sessions.clear();
         self.mikrotik_sessions.clear();
+        self.linux_sessions.clear();
 
         for node_state in import.nodes {
             let id = node_state.id.clone();
             self.sim.add_node(node_state);
             self.cisco_sessions.insert(id.clone(), CiscoCliEngine::new());
-            self.mikrotik_sessions.insert(id, MikroTikCliEngine::new());
+            self.mikrotik_sessions.insert(id.clone(), MikroTikCliEngine::new());
+            self.linux_sessions.insert(id, LinuxCliEngine::new());
         }
 
         for link in import.links {

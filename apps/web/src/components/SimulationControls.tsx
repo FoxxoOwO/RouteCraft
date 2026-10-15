@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Play, Pause, StepForward, Send, Zap, Download, Upload } from 'lucide-react';
+import { Play, Pause, StepForward, Send, Zap, Download, Upload, Trophy } from 'lucide-react';
 import { NodeModel } from '../types/simulation';
 
 interface Props {
@@ -10,6 +10,8 @@ interface Props {
   onTriggerPing: (srcNodeId: string, targetIp: string) => void;
   onExportTopology: () => void;
   onImportTopology: (jsonStr: string) => void;
+  onOpenChallenges: () => void;
+  challengeProgress: { completed: number; total: number; percentage: number };
   pendingEventCount: number;
   nodes: NodeModel[];
 }
@@ -22,6 +24,8 @@ export const SimulationControls: React.FC<Props> = ({
   onTriggerPing,
   onExportTopology,
   onImportTopology,
+  onOpenChallenges,
+  challengeProgress,
   pendingEventCount,
   nodes,
 }) => {
@@ -118,6 +122,19 @@ export const SimulationControls: React.FC<Props> = ({
             className="hidden"
           />
         </div>
+
+        {/* Lab Challenges & Auto-Grader Button */}
+        <div className="h-6 w-px bg-gray-800 mx-1" />
+        <button
+          onClick={onOpenChallenges}
+          className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-amber-950/80 to-amber-900/60 hover:from-amber-900 hover:to-amber-800 text-amber-200 border border-amber-700/60 rounded-lg text-xs font-semibold shadow-sm transition-all"
+        >
+          <Trophy className="w-3.5 h-3.5 text-amber-400" />
+          <span>Challenges</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-800/80 text-amber-100 font-mono">
+            {challengeProgress.completed}/{challengeProgress.total} ({challengeProgress.percentage}%)
+          </span>
+        </button>
       </div>
 
       {/* Discrete Event Engine Controls */}

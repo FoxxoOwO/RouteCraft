@@ -20,7 +20,9 @@ export const DeviceDrawer: React.FC<Props> = ({
   onToggleInterface,
 }) => {
   const [activeTab, setActiveTab] = useState<'cli' | 'interfaces' | 'tables'>('cli');
-  const [vendor, setVendor] = useState<'cisco' | 'mikrotik'>('cisco');
+  const [vendor, setVendor] = useState<'cisco' | 'mikrotik' | 'linux'>(
+    node?.device_type === 'host' ? 'linux' : 'cisco'
+  );
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [inputVal, setInputVal] = useState('');
@@ -37,7 +39,11 @@ export const DeviceDrawer: React.FC<Props> = ({
       setTerminalOutput([
         `Connected to ${node.hostname} (${node.device_type.toUpperCase()})`,
         `Vendor emulation mode: ${vendor.toUpperCase()}`,
-        `Type '?' for help, 'show ip int brief' or '/ip address print' to inspect.`,
+        vendor === 'linux'
+          ? `Type 'help', 'ip a', 'ip route', or 'hostname' to inspect/configure.`
+          : vendor === 'cisco'
+          ? `Type '?' for help, 'show ip int brief' or 'configure terminal'.`
+          : `Type '/ip address print', '/ip route print', or '/export'.`,
         '',
       ]);
       setHistory([]);
@@ -133,6 +139,16 @@ export const DeviceDrawer: React.FC<Props> = ({
               }`}
             >
               MikroTik
+            </button>
+            <button
+              onClick={() => setVendor('linux')}
+              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+                vendor === 'linux'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Linux
             </button>
           </div>
 

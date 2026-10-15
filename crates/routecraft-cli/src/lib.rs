@@ -1,8 +1,10 @@
 pub mod cisco;
+pub mod linux;
 pub mod mikrotik;
 pub mod traits;
 
 pub use cisco::{CiscoCliEngine, CiscoMode};
+pub use linux::LinuxCliEngine;
 pub use mikrotik::MikroTikCliEngine;
 pub use traits::{CliEngine, CliResponse};
 
@@ -88,4 +90,40 @@ mod tests {
         assert!(mt_export.output.contains("/ip address add address=192.168.10.1/24"));
         assert!(mt_export.output.contains("/ip address add address=10.0.0.1/24"));
     }
+
+    #[test]
+    fn test_linux_cli_and_cross_vendor_sync() {
+        let mut device = DeviceState::new("srv1", "Ubuntu-Server", DeviceType::Host);
+        device.add_interface(Interface::new(
+            "eth0",
+            MacAddress([0x00, 0x16, 0x3e, 0x11, 0x22, 0x33]),
+        ));
+
+        let mut linux = LinuxCliEngine::new();
+        let mut cisco = CiscoCliEngine::new();
+
+        assert_eq!(linux.prompt(&device), "root@Ubuntu-Server:~# ");
+
+        // Configure interface via Linux iproute2
+        linux.execute(&mut device, "ip link set eth0 up");
+        let res = linux.execute(&mut device, "ip addr add 192.168.1.100/24 dev eth0");
+        assert!(res.output.is_empty() || !res.output.contains("Error"));
+
+        linux.execute(&mut device, "ip route add default via 192.168.1.1");
+
+        // Verify state on device
+        let iface = device.get_interface("eth0").unwrap();
+        assert_eq!(iface.admin_status, AdminStatus::Up);
+        assert_eq!(iface.ipv4_address.unwrap().to_string(), "192.168.1.100/24");
+        assert!(device.routing_table.lookup("192.168.1.1".parse().unwrap()).is_some());
+
+        // Query via Linux ip addr show
+        let ip_a = linux.execute(&mut device, "ip a");
+        assert!(ip_a.output.contains("192.168.1.100/24"));
+
+        // Query via Cisco CLI!
+        let cisco_sh_int = cisco.execute(&mut device, "show ip int br");
+        assert!(cisco_sh_int.output.contains("192.168.1.100"));
+    }
 }
+
