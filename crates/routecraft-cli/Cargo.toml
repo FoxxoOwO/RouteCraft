@@ -1,0 +1,11 @@
+[package]
+name = "routecraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+routecraft-core = { path = "../routecraft-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
