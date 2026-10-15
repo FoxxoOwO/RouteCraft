@@ -316,7 +316,25 @@ impl CliEngine for CiscoCliEngine {
                             (Ok(net), Ok(mask), Ok(next_hop)) => {
                                 match Ipv4Cidr::from_ip_and_mask(net, mask) {
                                     Ok(dest) => {
-                                        let route = Route::new_static(dest, Some(next_hop), "", 1);
+                                        let target_iface = state.interfaces.values().find_map(|iface| {
+                                            if let Some(ip) = iface.ipv4_address {
+                                                if ip.contains(next_hop) {
+                                                    return Some(iface.name.clone());
+                                                }
+                                            }
+                                            None
+                                        });
+
+                                        let ifname = target_iface.unwrap_or_else(|| {
+                                            state
+                                                .interfaces
+                                                .keys()
+                                                .next()
+                                                .cloned()
+                                                .unwrap_or_default()
+                                        });
+
+                                        let route = Route::new_static(dest, Some(next_hop), ifname, 1);
                                         state.routing_table.add_route(route);
                                         CliResponse::empty()
                                     }

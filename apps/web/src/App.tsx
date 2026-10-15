@@ -13,6 +13,7 @@ import { DecisionLogPanel } from './components/DecisionLogPanel';
 import { DeviceDrawer } from './components/DeviceDrawer';
 import { PduInspectorModal } from './components/PduInspectorModal';
 import { AutoGraderModal } from './components/AutoGraderModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -34,8 +35,13 @@ export const App: React.FC = () => {
   const [isGraderModalOpen, setIsGraderModalOpen] = useState(false);
   const [objectiveResults, setObjectiveResults] = useState<Record<string, boolean>>({});
 
+  const hasInitializedRef = useRef(false);
+
   // Initialize Wasm module
   useEffect(() => {
+    if (hasInitializedRef.current) return;
+    hasInitializedRef.current = true;
+
     const startWasm = async () => {
       try {
         await init();
@@ -111,7 +117,12 @@ export const App: React.FC = () => {
       newSim.add_node('pc1', 'PC-1', 'host');
       newSim.add_interface('pc1', 'eth0', '00:11:22:33:44:10');
       newSim.set_interface_ip('pc1', 'eth0', '192.168.1.10/24');
+      newSim.execute_cli('pc1', 'cisco', 'enable');
+      newSim.execute_cli('pc1', 'cisco', 'conf t');
       newSim.execute_cli('pc1', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.1.1');
+      newSim.execute_cli('pc1', 'cisco', 'exit');
+      newSim.execute_cli('pc1', 'cisco', 'exit');
+      newSim.add_static_route('pc1', '0.0.0.0/0', '192.168.1.1');
 
       // 2. Router R1
       newSim.add_node('r1', 'Router-1', 'router');
@@ -126,7 +137,12 @@ export const App: React.FC = () => {
       newSim.add_node('pc2', 'PC-2', 'host');
       newSim.add_interface('pc2', 'eth0', '00:11:22:33:44:20');
       newSim.set_interface_ip('pc2', 'eth0', '192.168.2.20/24');
+      newSim.execute_cli('pc2', 'cisco', 'enable');
+      newSim.execute_cli('pc2', 'cisco', 'conf t');
       newSim.execute_cli('pc2', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.2.1');
+      newSim.execute_cli('pc2', 'cisco', 'exit');
+      newSim.execute_cli('pc2', 'cisco', 'exit');
+      newSim.add_static_route('pc2', '0.0.0.0/0', '192.168.2.1');
 
       // Links
       newSim.add_link('link1', 'pc1', 'eth0', 'r1', 'Gi0/0', 5);
@@ -147,6 +163,7 @@ export const App: React.FC = () => {
       // Sub-interface Gi0/0.10 (VLAN 10)
       newSim.add_interface('r1', 'Gi0/0.10', '00:aa:bb:cc:00:10');
       newSim.set_interface_admin_status('r1', 'Gi0/0.10', true);
+      newSim.execute_cli('r1', 'cisco', 'enable');
       newSim.execute_cli('r1', 'cisco', 'conf t');
       newSim.execute_cli('r1', 'cisco', 'interface Gi0/0.10');
       newSim.execute_cli('r1', 'cisco', 'encapsulation dot1q 10');
@@ -168,6 +185,7 @@ export const App: React.FC = () => {
       newSim.add_interface('sw1', 'Fa0/2', '00:aa:bb:cc:dd:02');
       newSim.add_interface('sw1', 'Fa0/3', '00:aa:bb:cc:dd:03');
 
+      newSim.execute_cli('sw1', 'cisco', 'enable');
       newSim.execute_cli('sw1', 'cisco', 'conf t');
       newSim.execute_cli('sw1', 'cisco', 'vlan 10');
       newSim.execute_cli('sw1', 'cisco', 'name Sales');
@@ -192,13 +210,23 @@ export const App: React.FC = () => {
       newSim.add_node('pc1', 'PC-Sales-1', 'host');
       newSim.add_interface('pc1', 'eth0', '00:11:22:33:44:10');
       newSim.set_interface_ip('pc1', 'eth0', '192.168.10.10/24');
+      newSim.execute_cli('pc1', 'cisco', 'enable');
+      newSim.execute_cli('pc1', 'cisco', 'conf t');
       newSim.execute_cli('pc1', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.10.1');
+      newSim.execute_cli('pc1', 'cisco', 'exit');
+      newSim.execute_cli('pc1', 'cisco', 'exit');
+      newSim.add_static_route('pc1', '0.0.0.0/0', '192.168.10.1');
 
       // 4. PC2 (VLAN 20 Engineering)
       newSim.add_node('pc2', 'PC-Eng-2', 'host');
       newSim.add_interface('pc2', 'eth0', '00:11:22:33:44:20');
       newSim.set_interface_ip('pc2', 'eth0', '192.168.20.20/24');
+      newSim.execute_cli('pc2', 'cisco', 'enable');
+      newSim.execute_cli('pc2', 'cisco', 'conf t');
       newSim.execute_cli('pc2', 'cisco', 'ip route 0.0.0.0 0.0.0.0 192.168.20.1');
+      newSim.execute_cli('pc2', 'cisco', 'exit');
+      newSim.execute_cli('pc2', 'cisco', 'exit');
+      newSim.add_static_route('pc2', '0.0.0.0/0', '192.168.20.1');
 
       // Links
       newSim.add_link('link_trunk', 'r1', 'Gi0/0', 'sw1', 'Fa0/1', 5);
@@ -455,8 +483,9 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#0B0F19] text-slate-100 overflow-hidden">
-      {/* Top Controls Bar */}
+    <ErrorBoundary>
+      <div className="w-screen h-screen flex flex-col bg-[#0B0F19] text-slate-100 overflow-hidden">
+        {/* Top Controls Bar */}
       <SimulationControls
         isPlaying={isPlaying}
         onTogglePlay={() => setIsPlaying((p) => !p)}
@@ -537,5 +566,6 @@ export const App: React.FC = () => {
         onResetPreset={(preset) => loadPreset(preset)}
       />
     </div>
+    </ErrorBoundary>
   );
 };

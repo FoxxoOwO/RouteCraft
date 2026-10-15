@@ -179,6 +179,23 @@ impl DeviceState {
             }
         }
 
+        // Subinterfaces inherit oper_status from their parent physical interface
+        let parent_oper = self
+            .interfaces
+            .get(&canonical)
+            .map(|i| i.oper_status)
+            .unwrap_or(OperStatus::Down);
+
+        for iface in self.interfaces.values_mut() {
+            if iface.parent_interface.as_deref() == Some(&canonical) {
+                if iface.admin_status == AdminStatus::Up {
+                    iface.oper_status = parent_oper;
+                } else {
+                    iface.oper_status = OperStatus::Down;
+                }
+            }
+        }
+
         self.recalculate_connected_routes();
         Ok(())
     }

@@ -30,8 +30,20 @@ export const SimulationControls: React.FC<Props> = ({
   nodes,
 }) => {
   const [selectedSrc, setSelectedSrc] = useState(nodes[0]?.id || 'pc1');
-  const [targetIp, setTargetIp] = useState('192.168.1.20');
+  const [targetIp, setTargetIp] = useState('192.168.20.20');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePresetClick = (preset: 'basic' | 'routed' | 'vlan') => {
+    onReset(preset);
+    setSelectedSrc('pc1');
+    if (preset === 'basic') {
+      setTargetIp('192.168.1.20');
+    } else if (preset === 'routed') {
+      setTargetIp('192.168.2.20');
+    } else if (preset === 'vlan') {
+      setTargetIp('192.168.20.20');
+    }
+  };
 
   const handlePingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,20 +90,20 @@ export const SimulationControls: React.FC<Props> = ({
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-slate-400 font-medium">Labs:</span>
           <button
-            onClick={() => onReset('basic')}
-            className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors"
+            onClick={() => handlePresetClick('basic')}
+            className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors cursor-pointer"
           >
             L2 Switch
           </button>
           <button
-            onClick={() => onReset('routed')}
-            className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors"
+            onClick={() => handlePresetClick('routed')}
+            className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-slate-200 rounded-md font-medium text-xs transition-colors cursor-pointer"
           >
             L3 Router
           </button>
           <button
-            onClick={() => onReset('vlan')}
-            className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900 text-purple-200 border border-purple-800/60 rounded-md font-medium text-xs transition-colors"
+            onClick={() => handlePresetClick('vlan')}
+            className="px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900 text-purple-200 border border-purple-800/60 rounded-md font-medium text-xs transition-colors cursor-pointer"
           >
             802.1Q Inter-VLAN
           </button>

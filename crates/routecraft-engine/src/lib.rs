@@ -347,7 +347,24 @@ impl SimNode {
                     }
 
                     if let Some(route) = self.state.routing_table.lookup(ip_pkt.dst_ip) {
-                        let egress_port = route.interface.clone();
+                        let egress_port = if !route.interface.is_empty() {
+                            route.interface.clone()
+                        } else if let Some(nh) = route.next_hop {
+                            self.state
+                                .interfaces
+                                .values()
+                                .find_map(|i| {
+                                    if let Some(cidr) = i.ipv4_address {
+                                        if cidr.contains(nh) {
+                                            return Some(i.name.clone());
+                                        }
+                                    }
+                                    None
+                                })
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        };
                         let target_ip = route.next_hop.unwrap_or(ip_pkt.dst_ip);
 
                         log.push(format!(
@@ -432,7 +449,24 @@ impl SimNode {
             }
         };
 
-        let egress_port = route.interface.clone();
+        let egress_port = if !route.interface.is_empty() {
+            route.interface.clone()
+        } else if let Some(nh) = route.next_hop {
+            self.state
+                .interfaces
+                .values()
+                .find_map(|i| {
+                    if let Some(cidr) = i.ipv4_address {
+                        if cidr.contains(nh) {
+                            return Some(i.name.clone());
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         let iface = match self.state.get_interface(&egress_port) {
             Some(i) => i.clone(),
             None => return (log, outgoing),

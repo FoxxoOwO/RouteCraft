@@ -227,7 +227,25 @@ impl CliEngine for MikroTikCliEngine {
                 }
 
                 if let (Some(dest), Some(gw)) = (dst, gateway) {
-                    let route = Route::new_static(dest, Some(gw), "", 1);
+                    let target_iface = state.interfaces.values().find_map(|iface| {
+                        if let Some(ip) = iface.ipv4_address {
+                            if ip.contains(gw) {
+                                return Some(iface.name.clone());
+                            }
+                        }
+                        None
+                    });
+
+                    let ifname = target_iface.unwrap_or_else(|| {
+                        state
+                            .interfaces
+                            .keys()
+                            .next()
+                            .cloned()
+                            .unwrap_or_default()
+                    });
+
+                    let route = Route::new_static(dest, Some(gw), ifname, 1);
                     state.routing_table.add_route(route);
                     CliResponse::empty()
                 } else {

@@ -325,6 +325,49 @@ impl WasmSimulation {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    pub fn add_static_route(
+        &mut self,
+        node_id: &str,
+        prefix_str: &str,
+        next_hop_str: &str,
+    ) -> Result<(), JsValue> {
+        let node = self
+            .sim
+            .nodes
+            .get_mut(node_id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+
+        let prefix = prefix_str
+            .parse::<routecraft_core::Ipv4Cidr>()
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let next_hop = next_hop_str
+            .parse::<Ipv4Addr>()
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let target_iface = node.state.interfaces.values().find_map(|iface| {
+            if let Some(ip) = iface.ipv4_address {
+                if ip.contains(next_hop) {
+                    return Some(iface.name.clone());
+                }
+            }
+            None
+        });
+
+        let ifname = target_iface.unwrap_or_else(|| {
+            node.state
+                .interfaces
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or_default()
+        });
+
+        let route = routecraft_core::Route::new_static(prefix, Some(next_hop), ifname, 1);
+        node.state.routing_table.add_route(route);
+        Ok(())
+    }
+
     pub fn add_link(
         &mut self,
         id: &str,
