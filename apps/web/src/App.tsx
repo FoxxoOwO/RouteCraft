@@ -36,14 +36,20 @@ export const App: React.FC = () => {
 
   // Initialize Wasm module
   useEffect(() => {
-    init()
-      .then(() => {
-        setWasmReady(true);
-        loadPreset('vlan'); // Default to the impressive 802.1Q Inter-VLAN setup
-      })
-      .catch((err) => {
-        console.error('Failed to initialize RouteCraft Wasm module:', err);
-      });
+    const startWasm = async () => {
+      try {
+        await init();
+      } catch {
+        // Fallback to public asset if needed
+        await init('/routecraft_wasm_bg.wasm');
+      }
+      setWasmReady(true);
+      loadPreset('vlan');
+    };
+
+    startWasm().catch((err) => {
+      console.error('Failed to initialize RouteCraft Wasm module:', err);
+    });
   }, []);
 
   const refreshTopology = useCallback(() => {
