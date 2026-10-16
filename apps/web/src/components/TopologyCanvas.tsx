@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { NodeModel, LinkModel, SimEventModel } from '../types/simulation';
+import { DeviceModel } from '../types/devices';
 import {
   Network,
   Server,
@@ -10,6 +11,7 @@ import {
   Scissors,
   Trash2,
   AlertTriangle,
+  Boxes,
 } from 'lucide-react';
 
 interface Props {
@@ -20,11 +22,13 @@ interface Props {
   selectedNodeId: string | null;
   onSelectNode: (id: string) => void;
   activePacket: SimEventModel | null;
-  onAddNode: (type: 'router' | 'switch' | 'host') => void;
+  onAddDevice: (model: DeviceModel, x?: number, y?: number) => void;
   onDeleteNode: (id: string) => void;
   onConnectLink: (nodeA: string, portA: string, nodeB: string, portB: string) => void;
   onToggleLink: (linkId: string, connected: boolean) => void;
   onDeleteLink: (linkId: string) => void;
+  isCatalogOpen: boolean;
+  onToggleCatalog: () => void;
 }
 
 export const TopologyCanvas: React.FC<Props> = ({
@@ -35,15 +39,18 @@ export const TopologyCanvas: React.FC<Props> = ({
   selectedNodeId,
   onSelectNode,
   activePacket,
-  onAddNode,
+  onAddDevice,
   onDeleteNode,
   onConnectLink,
   onToggleLink,
   onDeleteLink,
+  isCatalogOpen,
+  onToggleCatalog,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDragOverCanvas, setIsDragOverCanvas] = useState(false);
 
   // Cable creation state
   const [isCableToolActive, setIsCableToolActive] = useState(false);
@@ -117,6 +124,38 @@ export const TopologyCanvas: React.FC<Props> = ({
     }
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isDragOverCanvas) {
+      setIsDragOverCanvas(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setIsDragOverCanvas(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverCanvas(false);
+
+    try {
+      const rawData = e.dataTransfer.getData('application/routecraft-device');
+      if (!rawData || !containerRef.current) return;
+
+      const model: DeviceModel = JSON.parse(rawData);
+      const rect = containerRef.current.getBoundingClientRect();
+      const dropX = Math.max(50, Math.min(rect.width - 150, e.clientX - rect.left - 40));
+      const dropY = Math.max(50, Math.min(rect.height - 150, e.clientY - rect.top - 40));
+
+      onAddDevice(model, dropX, dropY);
+    } catch (err) {
+      console.error('Error dropping device on canvas:', err);
+    }
+  };
+
   return (
     <div
       ref={containerRef}
@@ -125,6 +164,9 @@ export const TopologyCanvas: React.FC<Props> = ({
       }`}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onClick={() => {
         if (!isCableToolActive) onSelectNode('');
       }}
@@ -133,40 +175,33 @@ export const TopologyCanvas: React.FC<Props> = ({
         backgroundSize: '24px 24px',
       }}
     >
+      {/* Drop Zone Visual Overlay during Drag */}
+      {isDragOverCanvas && (
+        <div className="absolute inset-0 z-20 border-2 border-dashed border-cyan-400 bg-cyan-950/25 backdrop-blur-[2px] flex items-center justify-center pointer-events-none transition-all">
+          <div className="px-5 py-3 rounded-2xl bg-[#0F172A]/90 border border-cyan-500/80 text-cyan-300 font-bold text-sm shadow-2xl flex items-center gap-3 animate-pulse">
+            <Plus className="w-5 h-5 text-cyan-400" />
+            <span>Pusťte zařízení sem pro umístění do workspace</span>
+          </div>
+        </div>
+      )}
+
       {/* Floating Canvas Toolbar */}
       <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#111827]/90 backdrop-blur-md p-1.5 rounded-xl border border-gray-800 shadow-xl">
-        {/* Add Nodes */}
-        <div className="flex items-center gap-1 border-r border-gray-800 pr-2">
-          <button
-            onClick={() => onAddNode('router')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-cyan-950/60 hover:text-cyan-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
-            title="Add Router"
-          >
-            <Plus className="w-3.5 h-3.5 text-cyan-400" />
-            <Network className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Router</span>
-          </button>
+        {/* Toggle Hardware Catalog Drawer */}
+        <button
+          onClick={onToggleCatalog}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all border cursor-pointer ${
+            isCatalogOpen
+              ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-600/30'
+              : 'bg-[#1E293B] hover:bg-cyan-950/60 hover:text-cyan-300 text-slate-200 border-gray-700/60'
+          }`}
+          title="Otevřít / zavřít šuplík s modely zařízení"
+        >
+          <Boxes className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Katalog zařízení (Šuplík)</span>
+        </button>
 
-          <button
-            onClick={() => onAddNode('switch')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-indigo-950/60 hover:text-indigo-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
-            title="Add Switch"
-          >
-            <Plus className="w-3.5 h-3.5 text-indigo-400" />
-            <Server className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Switch</span>
-          </button>
-
-          <button
-            onClick={() => onAddNode('host')}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#1E293B] hover:bg-emerald-950/60 hover:text-emerald-300 text-slate-200 text-xs font-semibold rounded-lg transition-colors border border-gray-700/60"
-            title="Add PC Host"
-          >
-            <Plus className="w-3.5 h-3.5 text-emerald-400" />
-            <Monitor className="w-3.5 h-3.5 text-emerald-400" />
-            <span>PC</span>
-          </button>
-        </div>
+        <div className="h-4 w-px bg-gray-800" />
 
         {/* Cable Connection Tool */}
         <button
@@ -175,7 +210,7 @@ export const TopologyCanvas: React.FC<Props> = ({
             setCableSource(null);
             setPortSelectNode(null);
           }}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors border ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors border cursor-pointer ${
             isCableToolActive
               ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/20'
               : 'bg-[#1E293B] hover:bg-gray-800 text-slate-200 border-gray-700/60'
@@ -190,7 +225,7 @@ export const TopologyCanvas: React.FC<Props> = ({
         {selectedNodeId && (
           <button
             onClick={() => onDeleteNode(selectedNodeId)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/50 hover:bg-rose-900 text-rose-300 text-xs font-semibold rounded-lg transition-colors border border-rose-800/60"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-950/50 hover:bg-rose-900 text-rose-300 text-xs font-semibold rounded-lg transition-colors border border-rose-800/60 cursor-pointer"
             title="Delete Selected Device"
           >
             <Trash2 className="w-3.5 h-3.5" />

@@ -9,6 +9,7 @@ interface Props {
   onExecuteCli: (nodeId: string, vendor: string, command: string) => CliResultModel | null;
   onGetPrompt: (nodeId: string, vendor: string) => string;
   onToggleInterface: (nodeId: string, ifaceName: string, up: boolean) => void;
+  preferredVendor?: 'cisco' | 'mikrotik' | 'linux';
 }
 
 export const DeviceDrawer: React.FC<Props> = ({
@@ -18,10 +19,11 @@ export const DeviceDrawer: React.FC<Props> = ({
   onExecuteCli,
   onGetPrompt,
   onToggleInterface,
+  preferredVendor,
 }) => {
   const [activeTab, setActiveTab] = useState<'cli' | 'interfaces' | 'tables'>('cli');
   const [vendor, setVendor] = useState<'cisco' | 'mikrotik' | 'linux'>(
-    node?.device_type === 'host' ? 'linux' : 'cisco'
+    preferredVendor || (node?.device_type === 'host' ? 'linux' : 'cisco')
   );
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -31,7 +33,26 @@ export const DeviceDrawer: React.FC<Props> = ({
   const terminalBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Update prompt and reset state when selected node changes
+  // Update vendor when selected node changes
+  useEffect(() => {
+    if (node) {
+      const initialVendor =
+        preferredVendor ||
+        (node.hostname.toLowerCase().includes('mikrotik') ||
+        node.hostname.toLowerCase().includes('crs') ||
+        node.hostname.toLowerCase().includes('rb')
+          ? 'mikrotik'
+          : node.device_type === 'host' ||
+            node.hostname.toLowerCase().includes('ubuntu') ||
+            node.hostname.toLowerCase().includes('debian') ||
+            node.hostname.toLowerCase().includes('linux')
+          ? 'linux'
+          : 'cisco');
+      setVendor(initialVendor);
+    }
+  }, [node?.id, preferredVendor]);
+
+  // Update prompt and reset state when selected node or vendor changes
   useEffect(() => {
     if (node) {
       const p = onGetPrompt(node.id, vendor);

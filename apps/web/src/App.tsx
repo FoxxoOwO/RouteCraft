@@ -14,6 +14,8 @@ import { DeviceDrawer } from './components/DeviceDrawer';
 import { PduInspectorModal } from './components/PduInspectorModal';
 import { AutoGraderModal } from './components/AutoGraderModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { DeviceCatalogDrawer } from './components/DeviceCatalogDrawer';
+import { DeviceModel } from './types/devices';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -29,6 +31,8 @@ export const App: React.FC = () => {
   const [selectedEventForPdu, setSelectedEventForPdu] = useState<SimEventModel | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(true);
+  const [nodeVendorMap, setNodeVendorMap] = useState<Record<string, 'cisco' | 'mikrotik' | 'linux'>>({});
 
   // Challenges & Auto-Grader state
   const [activeChallenge, setActiveChallenge] = useState<ChallengeDefinition>(LAB_CHALLENGES[0]);
@@ -336,38 +340,40 @@ export const App: React.FC = () => {
     }
   };
 
-  // Dynamic Topology Add / Delete Actions
-  const handleAddNode = (type: 'router' | 'switch' | 'host') => {
+  // Dynamic Topology Add Device from Hardware Catalog
+
+  const handleAddDevice = (model: DeviceModel, x?: number, y?: number) => {
     if (!simRef.current) return;
-    const count = topology.nodes.filter((n) => n.device_type === type).length + 1;
-    const prefix = type === 'router' ? 'R' : type === 'switch' ? 'SW' : 'PC';
-    const id = `${prefix.toLowerCase()}${count}_${Date.now().toString(36).slice(-3)}`;
-    const hostname = `${prefix}-${count}`;
+    const sameTypeCount =
+      topology.nodes.filter((n) => n.device_type === model.deviceType).length + 1;
+    const shortPrefix = model.name.split(' ')[0];
+    const id = `${model.id.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now().toString(36).slice(-3)}`;
+    const hostname = `${shortPrefix}-${sameTypeCount}`;
 
     try {
-      simRef.current.add_node(id, hostname, type);
+      simRef.current.add_node(id, hostname, model.deviceType);
 
-      // Add default interfaces
-      if (type === 'router') {
-        simRef.current.add_interface(id, 'Gi0/0', undefined);
-        simRef.current.add_interface(id, 'Gi0/1', undefined);
-      } else if (type === 'switch') {
-        simRef.current.add_interface(id, 'Fa0/1', undefined);
-        simRef.current.add_interface(id, 'Fa0/2', undefined);
-        simRef.current.add_interface(id, 'Fa0/3', undefined);
-        simRef.current.add_interface(id, 'Fa0/4', undefined);
-      } else {
-        simRef.current.add_interface(id, 'eth0', undefined);
+      // Add all model interfaces
+      for (const iface of model.interfaces) {
+        simRef.current.add_interface(id, iface, undefined);
       }
+
+      const posX = x !== undefined ? x : 320 + Math.random() * 80;
+      const posY = y !== undefined ? y : 140 + Math.random() * 80;
 
       setNodePositions((prev) => ({
         ...prev,
-        [id]: { x: 300 + Math.random() * 80, y: 200 + Math.random() * 80 },
+        [id]: { x: posX, y: posY },
+      }));
+
+      setNodeVendorMap((prev) => ({
+        ...prev,
+        [id]: model.defaultCliVendor,
       }));
 
       refreshTopology();
     } catch (err) {
-      console.error('Failed to add node:', err);
+      console.error('Failed to add device from catalog:', err);
     }
   };
 
@@ -514,7 +520,7 @@ export const App: React.FC = () => {
           selectedEventId={activePacket?.id || selectedEventForPdu?.id || null}
         />
 
-        {/* Center: Interactive Topology Canvas */}
+        {/* Center: Interactive Topology Canvas & Hardware Catalog Drawer */}
         <div className="flex-1 relative overflow-hidden">
           <TopologyCanvas
             nodes={topology.nodes}
@@ -524,11 +530,20 @@ export const App: React.FC = () => {
             selectedNodeId={selectedNodeId}
             onSelectNode={handleSelectNode}
             activePacket={activePacket}
-            onAddNode={handleAddNode}
+            onAddDevice={handleAddDevice}
             onDeleteNode={handleDeleteNode}
             onConnectLink={handleConnectLink}
             onToggleLink={handleToggleLink}
             onDeleteLink={handleDeleteLink}
+            isCatalogOpen={isCatalogOpen}
+            onToggleCatalog={() => setIsCatalogOpen((p) => !p)}
+          />
+
+          {/* Hardware Catalog Drawer (Šuplík se zařízeními) */}
+          <DeviceCatalogDrawer
+            isOpen={isCatalogOpen}
+            onToggleOpen={() => setIsCatalogOpen((p) => !p)}
+            onAddDevice={handleAddDevice}
           />
         </div>
 
@@ -541,6 +556,7 @@ export const App: React.FC = () => {
             onExecuteCli={handleExecuteCli}
             onGetPrompt={handleGetPrompt}
             onToggleInterface={handleToggleInterface}
+            preferredVendor={nodeVendorMap[selectedNode.id]}
           />
         )}
       </div>
