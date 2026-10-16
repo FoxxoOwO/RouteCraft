@@ -125,7 +125,11 @@ export const DeviceDrawer: React.FC<Props> = ({
   };
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[540px] bg-[#111827] border-l border-gray-800 shadow-2xl flex flex-col z-20">
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      className="absolute right-0 top-0 bottom-0 w-[540px] bg-[#111827] border-l border-gray-800 shadow-2xl flex flex-col z-40"
+    >
       {/* Drawer Header */}
       <div className="h-14 border-b border-gray-800 px-4 flex items-center justify-between bg-[#0F172A]">
         <div className="flex items-center gap-3">

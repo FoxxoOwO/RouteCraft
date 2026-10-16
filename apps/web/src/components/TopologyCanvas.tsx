@@ -89,6 +89,17 @@ export const TopologyCanvas: React.FC<Props> = ({
     setDraggingId(null);
   };
 
+  React.useEffect(() => {
+    if (!draggingId) return;
+    const handleGlobalMouseUp = () => {
+      setDraggingId(null);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [draggingId]);
+
   const handlePortSelect = (portName: string) => {
     if (!portSelectNode) return;
 
@@ -167,8 +178,11 @@ export const TopologyCanvas: React.FC<Props> = ({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={() => {
-        if (!isCableToolActive) onSelectNode('');
+      onClick={(e) => {
+        // Only deselect if user clicked directly on the canvas background, not on any child element
+        if (e.target === e.currentTarget && !isCableToolActive) {
+          onSelectNode('');
+        }
       }}
       style={{
         backgroundImage: `radial-gradient(circle, #1F2937 1px, transparent 1px)`,
@@ -186,7 +200,11 @@ export const TopologyCanvas: React.FC<Props> = ({
       )}
 
       {/* Floating Canvas Toolbar */}
-      <div className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#111827]/90 backdrop-blur-md p-1.5 rounded-xl border border-gray-800 shadow-xl">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#111827]/90 backdrop-blur-md p-1.5 rounded-xl border border-gray-800 shadow-xl"
+      >
         {/* Toggle Hardware Catalog Drawer */}
         <button
           onClick={onToggleCatalog}
@@ -278,7 +296,10 @@ export const TopologyCanvas: React.FC<Props> = ({
                 stroke="transparent"
                 strokeWidth={20}
                 className="cursor-pointer pointer-events-auto"
-                onClick={() => onToggleLink(link.id, !link.is_connected)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleLink(link.id, !link.is_connected);
+                }}
               />
 
               {/* Cable line */}
@@ -358,6 +379,8 @@ export const TopologyCanvas: React.FC<Props> = ({
             style={{
               transform: `translate(${midX - 60}px, ${midY - 14}px)`,
             }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
             className="absolute z-10 flex items-center gap-1 bg-[#0F172A]/90 border border-gray-800 rounded-lg px-2 py-0.5 shadow-md text-[10px] font-mono text-slate-300"
           >
             <span className={link.is_connected ? 'text-slate-300' : 'text-rose-400 line-through'}>
@@ -405,15 +428,21 @@ export const TopologyCanvas: React.FC<Props> = ({
           <div
             key={node.id}
             onMouseDown={(e) => handleMouseDown(node.id, e)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isCableToolActive) {
+                onSelectNode(node.id);
+              }
+            }}
             style={{
               transform: `translate(${pos.x}px, ${pos.y}px)`,
             }}
-            className={`absolute w-20 h-20 rounded-xl flex flex-col items-center justify-center cursor-move transition-all duration-150 ${
+            className={`absolute w-20 h-20 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-150 ${
               isCableSource
                 ? 'bg-amber-950/80 border-2 border-amber-400 shadow-xl shadow-amber-500/30'
                 : isSelected
-                ? 'bg-[#1E293B] border-2 border-blue-500 shadow-lg shadow-blue-500/20'
-                : 'bg-[#111827] border border-gray-700/80 hover:border-gray-500'
+                ? 'bg-[#1E293B] border-2 border-blue-500 shadow-lg shadow-blue-500/20 ring-2 ring-blue-400/40'
+                : 'bg-[#111827] border border-gray-700/80 hover:border-gray-500 hover:bg-[#162032]'
             }`}
           >
             <div className="relative">

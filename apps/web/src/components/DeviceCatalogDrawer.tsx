@@ -85,6 +85,8 @@ export const DeviceCatalogDrawer: React.FC<Props> = ({
 
   return (
     <div
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
       className={`absolute bottom-0 left-0 right-0 z-30 bg-[#0E1526]/95 backdrop-blur-md border-t border-gray-800 shadow-2xl transition-all duration-300 flex flex-col ${
         isOpen ? 'h-72' : 'h-11'
       }`}
