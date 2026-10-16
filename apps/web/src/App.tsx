@@ -15,7 +15,7 @@ import { PduInspectorModal } from './components/PduInspectorModal';
 import { AutoGraderModal } from './components/AutoGraderModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DeviceCatalogDrawer } from './components/DeviceCatalogDrawer';
-import { DeviceModel } from './types/devices';
+import { DeviceModel, NodeVendorMeta } from './types/devices';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -32,7 +32,7 @@ export const App: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [isCatalogOpen, setIsCatalogOpen] = useState(true);
-  const [nodeVendorMap, setNodeVendorMap] = useState<Record<string, 'cisco' | 'mikrotik' | 'linux'>>({});
+  const [nodeVendorMap, setNodeVendorMap] = useState<Record<string, NodeVendorMeta>>({});
 
   // Challenges & Auto-Grader state
   const [activeChallenge, setActiveChallenge] = useState<ChallengeDefinition>(LAB_CHALLENGES[0]);
@@ -316,7 +316,10 @@ export const App: React.FC = () => {
   const handleExecuteCli = (nodeId: string, vendor: string, command: string): CliResultModel | null => {
     if (!simRef.current) return null;
     try {
-      const res = simRef.current.execute_cli(nodeId, vendor, command) as CliResultModel;
+      const meta = nodeVendorMap[nodeId];
+      // For vendor-locked devices, strictly enforce their native CLI vendor
+      const targetVendor = meta?.isLocked ? meta.cliVendor : vendor;
+      const res = simRef.current.execute_cli(nodeId, targetVendor, command) as CliResultModel;
       refreshTopology();
       return res;
     } catch (err) {
@@ -327,7 +330,9 @@ export const App: React.FC = () => {
 
   const handleGetPrompt = (nodeId: string, vendor: string): string => {
     if (!simRef.current) return '> ';
-    return simRef.current.get_cli_prompt(nodeId, vendor);
+    const meta = nodeVendorMap[nodeId];
+    const targetVendor = meta?.isLocked ? meta.cliVendor : vendor;
+    return simRef.current.get_cli_prompt(nodeId, targetVendor);
   };
 
   const handleToggleInterface = (nodeId: string, ifaceName: string, up: boolean) => {
@@ -366,9 +371,18 @@ export const App: React.FC = () => {
         [id]: { x: posX, y: posY },
       }));
 
+      const isLocked = model.vendor !== 'generic';
+      const meta: NodeVendorMeta = {
+        vendorId: model.vendor,
+        vendorName: model.vendorName,
+        modelName: model.name,
+        cliVendor: model.defaultCliVendor,
+        isLocked,
+      };
+
       setNodeVendorMap((prev) => ({
         ...prev,
-        [id]: model.defaultCliVendor,
+        [id]: meta,
       }));
 
       refreshTopology();
@@ -556,7 +570,7 @@ export const App: React.FC = () => {
             onExecuteCli={handleExecuteCli}
             onGetPrompt={handleGetPrompt}
             onToggleInterface={handleToggleInterface}
-            preferredVendor={nodeVendorMap[selectedNode.id]}
+            vendorMeta={nodeVendorMap[selectedNode.id]}
           />
         )}
       </div>

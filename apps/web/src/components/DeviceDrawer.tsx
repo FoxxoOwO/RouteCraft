@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NodeModel, NodeTablesModel, CliResultModel } from '../types/simulation';
-import { Terminal, Network, Table, X } from 'lucide-react';
+import { NodeVendorMeta, resolveNodeVendorMeta } from '../types/devices';
+import { Terminal, Network, Table, X, Lock } from 'lucide-react';
 
 interface Props {
   node: NodeModel | null;
@@ -9,6 +10,7 @@ interface Props {
   onExecuteCli: (nodeId: string, vendor: string, command: string) => CliResultModel | null;
   onGetPrompt: (nodeId: string, vendor: string) => string;
   onToggleInterface: (nodeId: string, ifaceName: string, up: boolean) => void;
+  vendorMeta?: NodeVendorMeta;
   preferredVendor?: 'cisco' | 'mikrotik' | 'linux';
 }
 
@@ -19,11 +21,19 @@ export const DeviceDrawer: React.FC<Props> = ({
   onExecuteCli,
   onGetPrompt,
   onToggleInterface,
+  vendorMeta,
   preferredVendor,
 }) => {
+  const effectiveVendorMeta = node
+    ? resolveNodeVendorMeta(node.id, node.hostname, node.device_type, vendorMeta)
+    : undefined;
+
+  const isLocked = effectiveVendorMeta?.isLocked ?? false;
+  const lockedCliVendor = effectiveVendorMeta?.cliVendor ?? preferredVendor ?? 'cisco';
+
   const [activeTab, setActiveTab] = useState<'cli' | 'interfaces' | 'tables'>('cli');
   const [vendor, setVendor] = useState<'cisco' | 'mikrotik' | 'linux'>(
-    preferredVendor || (node?.device_type === 'host' ? 'linux' : 'cisco')
+    isLocked ? lockedCliVendor : (preferredVendor || (node?.device_type === 'host' ? 'linux' : 'cisco'))
   );
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
@@ -33,46 +43,49 @@ export const DeviceDrawer: React.FC<Props> = ({
   const terminalBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Update vendor when selected node changes
+  // Update vendor when selected node or vendor metadata changes
   useEffect(() => {
-    if (node) {
-      const initialVendor =
-        preferredVendor ||
-        (node.hostname.toLowerCase().includes('mikrotik') ||
-        node.hostname.toLowerCase().includes('crs') ||
-        node.hostname.toLowerCase().includes('rb')
-          ? 'mikrotik'
-          : node.device_type === 'host' ||
-            node.hostname.toLowerCase().includes('ubuntu') ||
-            node.hostname.toLowerCase().includes('debian') ||
-            node.hostname.toLowerCase().includes('linux')
-          ? 'linux'
-          : 'cisco');
-      setVendor(initialVendor);
+    if (node && effectiveVendorMeta) {
+      if (effectiveVendorMeta.isLocked) {
+        setVendor(effectiveVendorMeta.cliVendor);
+      } else if (preferredVendor) {
+        setVendor(preferredVendor);
+      }
     }
-  }, [node?.id, preferredVendor]);
+  }, [node?.id, effectiveVendorMeta?.cliVendor, effectiveVendorMeta?.isLocked, preferredVendor]);
 
   // Update prompt and reset state when selected node or vendor changes
   useEffect(() => {
     if (node) {
-      const p = onGetPrompt(node.id, vendor);
+      const activeVendor = isLocked ? lockedCliVendor : vendor;
+      const p = onGetPrompt(node.id, activeVendor);
       setPrompt(p);
       setTerminalOutput([
         `Connected to ${node.hostname} (${node.device_type.toUpperCase()})`,
-        `Vendor emulation mode: ${vendor.toUpperCase()}`,
-        vendor === 'linux'
+        effectiveVendorMeta?.modelName ? `Model: ${effectiveVendorMeta.modelName}` : '',
+        isLocked
+          ? `Hardware vendor: ${effectiveVendorMeta?.vendorName} [LOCKED NATIVE CLI]`
+          : `Vendor emulation mode: ${vendor.toUpperCase()} (Multi-Vendor Unlocked)`,
+        activeVendor === 'linux'
           ? `Type 'help', 'ip a', 'ip route', or 'hostname' to inspect/configure.`
-          : vendor === 'cisco'
+          : activeVendor === 'cisco'
           ? `Type '?' for help, 'show ip int brief' or 'configure terminal'.`
           : `Type '/ip address print', '/ip route print', or '/export'.`,
         '',
-      ]);
+      ].filter(Boolean));
       setHistory([]);
       setHistoryIndex(-1);
       setInputVal('');
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [node?.id, vendor]);
+  }, [node?.id, vendor, isLocked, lockedCliVendor]);
+
+  const handleVendorSelect = (newVendor: 'cisco' | 'mikrotik' | 'linux') => {
+    if (isLocked) {
+      return; // Disallow switching CLI for vendored devices!
+    }
+    setVendor(newVendor);
+  };
 
   useEffect(() => {
     terminalBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -132,54 +145,116 @@ export const DeviceDrawer: React.FC<Props> = ({
     >
       {/* Drawer Header */}
       <div className="h-14 border-b border-gray-800 px-4 flex items-center justify-between bg-[#0F172A]">
-        <div className="flex items-center gap-3">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-          <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
-            {node.hostname}
-            <span className="text-xs px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 uppercase font-mono">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2 truncate">
+            <span className="truncate">{node.hostname}</span>
+            <span className="text-xs px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 uppercase font-mono shrink-0">
               {node.device_type}
             </span>
+            {effectiveVendorMeta?.modelName && (
+              <span className="hidden md:inline-block text-[11px] px-2 py-0.5 rounded bg-slate-800/80 border border-slate-700/60 text-slate-300 font-normal truncate max-w-[150px]">
+                {effectiveVendorMeta.modelName}
+              </span>
+            )}
           </h2>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Vendor Lock Indicator Badge */}
+          {isLocked && effectiveVendorMeta && (
+            <div
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-950/70 border border-amber-600/50 text-amber-300 text-xs select-none shadow-sm"
+              title={`Zařízení ${effectiveVendorMeta.modelName} od výrobce ${effectiveVendorMeta.vendorName} má pevně uzamčené nativní CLI.`}
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="font-semibold truncate max-w-[120px]">{effectiveVendorMeta.vendorName}</span>
+              <span className="text-[10px] uppercase font-mono px-1 py-0.5 rounded bg-amber-900/80 text-amber-200">
+                LOCKED
+              </span>
+            </div>
+          )}
+
           {/* Vendor Selector */}
           <div className="flex bg-[#1E293B] rounded-lg p-0.5 border border-gray-700">
+            {/* Cisco IOS Button */}
             <button
-              onClick={() => setVendor('cisco')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              disabled={isLocked && lockedCliVendor !== 'cisco'}
+              onClick={() => handleVendorSelect('cisco')}
+              title={
+                isLocked && lockedCliVendor !== 'cisco'
+                  ? `Přepnutí na Cisco CLI je u zařízení od ${effectiveVendorMeta?.vendorName} zakázáno (použijte nativní CLI)`
+                  : 'Cisco IOS CLI'
+              }
+              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                 vendor === 'cisco'
                   ? 'bg-cyan-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : isLocked
+                  ? 'text-slate-500 opacity-35 cursor-not-allowed line-through'
+                  : 'text-slate-400 hover:text-slate-200 cursor-pointer'
               }`}
             >
-              Cisco IOS
+              {isLocked && lockedCliVendor === 'cisco' && <Lock className="w-3 h-3 text-cyan-200" />}
+              <span>
+                {isLocked && effectiveVendorMeta?.vendorId === 'microsens'
+                  ? 'MICROSENS'
+                  : isLocked && effectiveVendorMeta?.vendorId === 'edgecore'
+                  ? 'Edgecore'
+                  : 'Cisco IOS'}
+              </span>
             </button>
+
+            {/* MikroTik Button */}
             <button
-              onClick={() => setVendor('mikrotik')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              disabled={isLocked && lockedCliVendor !== 'mikrotik'}
+              onClick={() => handleVendorSelect('mikrotik')}
+              title={
+                isLocked && lockedCliVendor !== 'mikrotik'
+                  ? `Přepnutí na MikroTik CLI je u zařízení od ${effectiveVendorMeta?.vendorName} zakázáno (použijte nativní CLI)`
+                  : 'MikroTik RouterOS CLI'
+              }
+              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                 vendor === 'mikrotik'
                   ? 'bg-rose-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : isLocked
+                  ? 'text-slate-500 opacity-35 cursor-not-allowed line-through'
+                  : 'text-slate-400 hover:text-slate-200 cursor-pointer'
               }`}
             >
-              MikroTik
+              {isLocked && lockedCliVendor === 'mikrotik' && <Lock className="w-3 h-3 text-rose-200" />}
+              <span>MikroTik</span>
             </button>
+
+            {/* Linux Button */}
             <button
-              onClick={() => setVendor('linux')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+              disabled={isLocked && lockedCliVendor !== 'linux'}
+              onClick={() => handleVendorSelect('linux')}
+              title={
+                isLocked && lockedCliVendor !== 'linux'
+                  ? `Přepnutí na Linux CLI je u zařízení od ${effectiveVendorMeta?.vendorName} zakázáno (použijte nativní CLI)`
+                  : 'Linux Shell'
+              }
+              className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors flex items-center gap-1.5 ${
                 vendor === 'linux'
                   ? 'bg-amber-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  : isLocked
+                  ? 'text-slate-500 opacity-35 cursor-not-allowed line-through'
+                  : 'text-slate-400 hover:text-slate-200 cursor-pointer'
               }`}
             >
-              Linux
+              {isLocked && lockedCliVendor === 'linux' && <Lock className="w-3 h-3 text-amber-200" />}
+              <span>
+                {isLocked && effectiveVendorMeta?.vendorId === 'edgecore'
+                  ? 'SONiC'
+                  : 'Linux'}
+              </span>
             </button>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-gray-800"
+            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-gray-800 cursor-pointer"
+            title="Zavřít panel (Esc)"
           >
             <X className="w-4 h-4" />
           </button>

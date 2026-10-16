@@ -476,3 +476,111 @@ export const HARDWARE_CATALOG: VendorCategory[] = [
     ],
   },
 ];
+
+export interface NodeVendorMeta {
+  vendorId: VendorId;
+  vendorName: string;
+  modelName: string;
+  cliVendor: 'cisco' | 'mikrotik' | 'linux';
+  isLocked: boolean;
+}
+
+export function resolveNodeVendorMeta(
+  nodeId: string,
+  hostname: string,
+  deviceType: string,
+  savedMeta?: NodeVendorMeta
+): NodeVendorMeta {
+  if (savedMeta) {
+    return savedMeta;
+  }
+
+  const lowerHost = hostname.toLowerCase();
+  const lowerId = nodeId.toLowerCase();
+
+  // MikroTik detection
+  if (
+    lowerHost.includes('mikrotik') ||
+    lowerHost.includes('rb4011') ||
+    lowerHost.includes('ccr') ||
+    lowerHost.includes('crs') ||
+    lowerHost.includes('hex') ||
+    lowerId.includes('mikrotik')
+  ) {
+    return {
+      vendorId: 'mikrotik',
+      vendorName: 'MikroTik RouterBOARD',
+      modelName: 'MikroTik RouterOS Device',
+      cliVendor: 'mikrotik',
+      isLocked: true,
+    };
+  }
+
+  // MICROSENS detection
+  if (lowerHost.includes('microsens') || lowerId.includes('microsens')) {
+    const isRouter = deviceType === 'router' || lowerHost.includes('iot');
+    return {
+      vendorId: 'microsens',
+      vendorName: 'MICROSENS',
+      modelName: isRouter ? 'MICROSENS Industrial IoT Router' : 'MICROSENS G6 FTTO Switch',
+      cliVendor: isRouter ? 'linux' : 'cisco',
+      isLocked: true,
+    };
+  }
+
+  // Edgecore detection
+  if (lowerHost.includes('edgecore') || lowerId.includes('edgecore')) {
+    const isSonic =
+      lowerHost.includes('as7726') || lowerId.includes('as7726') || lowerHost.includes('whitebox');
+    return {
+      vendorId: 'edgecore',
+      vendorName: 'Edgecore Networks',
+      modelName: isSonic ? 'Edgecore AS7726 Whitebox' : 'Edgecore Enterprise Switch',
+      cliVendor: isSonic ? 'linux' : 'cisco',
+      isLocked: true,
+    };
+  }
+
+  // Cisco detection
+  if (
+    lowerHost.includes('cisco') ||
+    lowerHost.includes('catalyst') ||
+    lowerHost.includes('nexus') ||
+    lowerId.includes('cisco')
+  ) {
+    return {
+      vendorId: 'cisco',
+      vendorName: 'Cisco Systems',
+      modelName: 'Cisco IOS Device',
+      cliVendor: 'cisco',
+      isLocked: true,
+    };
+  }
+
+  // Linux detection
+  if (
+    lowerHost.includes('ubuntu') ||
+    lowerHost.includes('debian') ||
+    lowerHost.includes('alpine') ||
+    lowerHost.includes('opnsense') ||
+    lowerHost.includes('pfsense') ||
+    lowerId.includes('linux')
+  ) {
+    return {
+      vendorId: 'linux',
+      vendorName: 'Linux / Open-Source',
+      modelName: 'Linux Network Host',
+      cliVendor: 'linux',
+      isLocked: true,
+    };
+  }
+
+  // Generic device (Presets or generic additions)
+  return {
+    vendorId: 'generic',
+    vendorName: 'Generic Device',
+    modelName: `${deviceType.toUpperCase()} (Multi-Vendor)`,
+    cliVendor: deviceType === 'host' ? 'linux' : 'cisco',
+    isLocked: false,
+  };
+}
