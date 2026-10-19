@@ -113,6 +113,38 @@ impl CiscoCliEngine {
         out
     }
 
+    fn render_show_mac_address_table(&self, state: &DeviceState) -> String {
+        let mut out = String::new();
+        out.push_str("          Mac Address Table\n");
+        out.push_str("-------------------------------------------\n\n");
+        out.push_str("Vlan    Mac Address       Type        Ports\n");
+        out.push_str("----    -----------       --------    -----\n");
+        let mut count = 0;
+        for entry in state.mac_table.iter() {
+            let entry_type = if entry.is_static { "STATIC" } else { "DYNAMIC" };
+            out.push_str(&format!(
+                "{:<7} {:<17} {:<11} {}\n",
+                entry.vlan, entry.mac, entry_type, entry.port
+            ));
+            count += 1;
+        }
+        out.push_str(&format!("Total Mac Addresses for this module: {}\n", count));
+        out
+    }
+
+    fn render_show_arp(&self, state: &DeviceState) -> String {
+        let mut out = String::new();
+        out.push_str("Protocol  Address          Age (min)  Hardware Addr   Type   Interface\n");
+        for entry in state.arp_table.iter() {
+            let age_str = if entry.is_static { "-".to_string() } else { (entry.age_seconds / 60).to_string() };
+            out.push_str(&format!(
+                "Internet  {:<16} {:<10} {:<15} ARPA   {}\n",
+                entry.ip, age_str, entry.mac, entry.interface
+            ));
+        }
+        out
+    }
+
     fn render_show_running_config(&self, state: &DeviceState) -> String {
         let mut out = String::new();
         out.push_str("Building configuration...\n\n");
@@ -214,11 +246,19 @@ impl CliEngine for CiscoCliEngine {
                         || (words.len() >= 2 && words[1] == "vlan")
                     {
                         CliResponse::ok(self.render_show_vlan_brief(state))
+                    } else if words.len() >= 2 && (words[1] == "arp" || (words.len() >= 3 && words[1..3] == ["ip", "arp"])) {
+                        CliResponse::ok(self.render_show_arp(state))
+                    } else if words.len() >= 2
+                        && (words[1] == "mac"
+                            || words[1] == "mac-address-table"
+                            || (words.len() >= 3 && words[1..3] == ["mac", "address-table"]))
+                    {
+                        CliResponse::ok(self.render_show_mac_address_table(state))
                     } else {
                         CliResponse::ok("% Incomplete command.\n")
                     }
                 }
-                _ => CliResponse::ok(format!("% Unknown command or computer name, or unable to find computer address\n")),
+                _ => CliResponse::ok("% Unknown command or computer name, or unable to find computer address\n"),
             },
 
             CiscoMode::PrivilegedExec => match cmd.as_str() {
@@ -250,6 +290,14 @@ impl CliEngine for CiscoCliEngine {
                         || (words.len() >= 2 && words[1] == "vlan")
                     {
                         CliResponse::ok(self.render_show_vlan_brief(state))
+                    } else if words.len() >= 2 && (words[1] == "arp" || (words.len() >= 3 && words[1..3] == ["ip", "arp"])) {
+                        CliResponse::ok(self.render_show_arp(state))
+                    } else if words.len() >= 2
+                        && (words[1] == "mac"
+                            || words[1] == "mac-address-table"
+                            || (words.len() >= 3 && words[1..3] == ["mac", "address-table"]))
+                    {
+                        CliResponse::ok(self.render_show_mac_address_table(state))
                     } else {
                         CliResponse::ok("% Incomplete command.\n")
                     }

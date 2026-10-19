@@ -37,8 +37,7 @@ impl LinuxCliEngine {
             out.push_str("    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00\n");
             out.push_str("    inet 127.0.0.1/8 scope host lo\n");
 
-            let mut idx = 2;
-            for iface in state.interfaces.values() {
+            for (idx, iface) in (2..).zip(state.interfaces.values()) {
                 let state_str = if iface.is_up() { "UP" } else { "DOWN" };
                 let flags = if iface.is_up() {
                     "<BROADCAST,MULTICAST,UP,LOWER_UP>"
@@ -58,7 +57,6 @@ impl LinuxCliEngine {
                 if let Some(ip) = iface.ipv4_address {
                     out.push_str(&format!("    inet {} scope global {}\n", ip, iface.name));
                 }
-                idx += 1;
             }
             CliResponse::ok(out.trim_end())
         } else if args[0] == "add" {

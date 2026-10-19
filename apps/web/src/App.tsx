@@ -15,7 +15,7 @@ import { PduInspectorModal } from './components/PduInspectorModal';
 import { AutoGraderModal } from './components/AutoGraderModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DeviceCatalogDrawer } from './components/DeviceCatalogDrawer';
-import { DeviceModel, NodeVendorMeta } from './types/devices';
+import { DeviceModel, NodeVendorMeta, resolveNodeVendorMeta } from './types/devices';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -455,16 +455,19 @@ export const App: React.FC = () => {
       setSelectedEventForPdu(null);
       setSelectedNodeId(null);
 
-      // Auto position nodes if empty
+      // Auto position nodes if empty and resolve vendor metadata
       const topo = simRef.current.get_topology() as TopologyModel;
       const positions: Record<string, { x: number; y: number }> = {};
+      const newMap: Record<string, NodeVendorMeta> = {};
       topo.nodes.forEach((n, idx) => {
         positions[n.id] = {
           x: 120 + (idx % 4) * 220,
           y: 180 + Math.floor(idx / 4) * 160,
         };
+        newMap[n.id] = resolveNodeVendorMeta(n.id, n.hostname, n.device_type);
       });
       setNodePositions(positions);
+      setNodeVendorMap(newMap);
       setTopology(topo);
       setPendingCount(0);
     } catch (err) {

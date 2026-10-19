@@ -387,13 +387,11 @@ impl WasmSimulation {
     }
 
     pub fn toggle_link(&mut self, link_id: &str, connected: bool) -> Result<bool, JsValue> {
-        for link in &mut self.sim.links {
-            if link.id == link_id {
-                link.is_connected = connected;
-                return Ok(true);
-            }
+        if self.sim.toggle_link(link_id, connected) {
+            Ok(true)
+        } else {
+            Err(JsValue::from_str("Link not found"))
         }
-        Err(JsValue::from_str("Link not found"))
     }
 
     pub fn clear(&mut self) {
@@ -599,7 +597,7 @@ impl WasmSimulation {
                 let session = self
                     .cisco_sessions
                     .entry(node_id.to_string())
-                    .or_insert_with(CiscoCliEngine::new);
+                    .or_default();
                 let res = session.execute(&mut node.state, command);
                 let p = session.prompt(&node.state);
                 (res, p)
@@ -608,7 +606,7 @@ impl WasmSimulation {
                 let session = self
                     .mikrotik_sessions
                     .entry(node_id.to_string())
-                    .or_insert_with(MikroTikCliEngine::new);
+                    .or_default();
                 let res = session.execute(&mut node.state, command);
                 let p = session.prompt(&node.state);
                 (res, p)
@@ -617,7 +615,7 @@ impl WasmSimulation {
                 let session = self
                     .linux_sessions
                     .entry(node_id.to_string())
-                    .or_insert_with(LinuxCliEngine::new);
+                    .or_default();
                 let res = session.execute(&mut node.state, command);
                 let p = session.prompt(&node.state);
                 (res, p)
@@ -696,6 +694,8 @@ impl WasmSimulation {
         }
 
         for link in import.links {
+            let is_conn = link.is_connected;
+            let link_id = link.id.clone();
             self.sim.add_link(
                 link.id,
                 link.node_a,
@@ -704,8 +704,17 @@ impl WasmSimulation {
                 link.port_b,
                 link.latency_ms,
             );
+            if !is_conn {
+                self.sim.toggle_link(&link_id, false);
+            }
         }
 
         Ok(())
+    }
+}
+
+impl Default for WasmSimulation {
+    fn default() -> Self {
+        Self::new()
     }
 }

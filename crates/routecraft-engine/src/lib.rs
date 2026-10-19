@@ -52,7 +52,7 @@ impl PartialOrd for SimEvent {
 
 pub struct SimNode {
     pub state: DeviceState,
-    pub pending_arp: BTreeMap<Ipv4Addr, Vec<EthernetFrame>>,
+    pub pending_arp: BTreeMap<Ipv4Addr, Vec<(String, EthernetFrame)>>,
 }
 
 impl SimNode {
@@ -287,9 +287,9 @@ impl SimNode {
                                 queued.len(),
                                 arp.sender_ip
                             ));
-                            for mut pending_frame in queued {
+                            for (egress_port, mut pending_frame) in queued {
                                 pending_frame.dst_mac = arp.sender_mac;
-                                outgoing.push((ingress_port.to_string(), pending_frame));
+                                outgoing.push((egress_port, pending_frame));
                             }
                         }
                     }
@@ -402,7 +402,7 @@ impl SimNode {
                                 self.pending_arp
                                     .entry(target_ip)
                                     .or_default()
-                                    .push(forwarded_frame);
+                                    .push((actual_physical_port.clone(), forwarded_frame));
 
                                 if let Some(egress_ip) = egress_iface.ipv4_address {
                                     let mut arp_req = EthernetFrame::new_arp_request(
@@ -469,7 +469,13 @@ impl SimNode {
         };
         let iface = match self.state.get_interface(&egress_port) {
             Some(i) => i.clone(),
-            None => return (log, outgoing),
+            None => {
+                log.push(format!(
+                    "[{}] Cannot ping {}: Outgoing interface '{}' not found on device.",
+                    self.state.hostname, target_ip, egress_port
+                ));
+                return (log, outgoing);
+            }
         };
 
         let src_ip = match iface.ipv4_address {
@@ -525,7 +531,10 @@ impl SimNode {
             if let Some(vlan) = maybe_vlan {
                 icmp_frame = icmp_frame.with_vlan(vlan);
             }
-            self.pending_arp.entry(l3_target).or_default().push(icmp_frame);
+            self.pending_arp
+                .entry(l3_target)
+                .or_default()
+                .push((actual_physical_port.clone(), icmp_frame));
 
             let mut arp_frame = EthernetFrame::new_arp_request(iface.mac_address, src_ip, l3_target);
             if let Some(vlan) = maybe_vlan {
@@ -538,24 +547,13 @@ impl SimNode {
     }
 }
 
+#[derive(Default)]
 pub struct NetworkSimulation {
     pub current_time: SimTime,
     pub nodes: BTreeMap<String, SimNode>,
     pub links: Vec<SimLink>,
     pub event_queue: BinaryHeap<SimEvent>,
     pub event_counter: u64,
-}
-
-impl Default for NetworkSimulation {
-    fn default() -> Self {
-        Self {
-            current_time: 0,
-            nodes: BTreeMap::new(),
-            links: Vec::new(),
-            event_queue: BinaryHeap::new(),
-            event_counter: 0,
-        }
-    }
 }
 
 impl NetworkSimulation {
@@ -621,6 +619,30 @@ impl NetworkSimulation {
                 if let Some(node) = self.nodes.get_mut(&removed.node_b) {
                     let _ = node.state.set_interface_oper_status(&removed.port_b, OperStatus::Down);
                 }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn toggle_link(&mut self, link_id: &str, connected: bool) -> bool {
+        if let Some(link) = self.links.iter_mut().find(|l| l.id == link_id) {
+            link.is_connected = connected;
+            let na = link.node_a.clone();
+            let pa = link.port_a.clone();
+            let nb = link.node_b.clone();
+            let pb = link.port_b.clone();
+            let new_oper = if connected {
+                OperStatus::Up
+            } else {
+                OperStatus::Down
+            };
+            if let Some(node) = self.nodes.get_mut(&na) {
+                let _ = node.state.set_interface_oper_status(&pa, new_oper);
+            }
+            if let Some(node) = self.nodes.get_mut(&nb) {
+                let _ = node.state.set_interface_oper_status(&pb, new_oper);
             }
             true
         } else {

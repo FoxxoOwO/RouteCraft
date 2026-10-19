@@ -70,6 +70,34 @@ impl MikroTikCliEngine {
         out
     }
 
+    fn render_ip_arp_print(&self, state: &DeviceState) -> String {
+        let mut out = String::new();
+        out.push_str("Flags: D - DYNAMIC\n");
+        out.push_str("Columns: ADDRESS, MAC-ADDRESS, INTERFACE\n");
+        out.push_str("#   ADDRESS          MAC-ADDRESS       INTERFACE\n");
+        for (i, entry) in state.arp_table.iter().enumerate() {
+            let flag = if entry.is_static { " " } else { "D" };
+            out.push_str(&format!(
+                "{:<3} {} {:<16} {:<17} {}\n",
+                i, flag, entry.ip, entry.mac, entry.interface
+            ));
+        }
+        out
+    }
+
+    fn render_bridge_host_print(&self, state: &DeviceState) -> String {
+        let mut out = String::new();
+        out.push_str("Flags: D - DYNAMIC\n");
+        out.push_str(" #   MAC-ADDRESS       ON-INTERFACE  VID\n");
+        for (i, entry) in state.mac_table.iter().enumerate() {
+            out.push_str(&format!(
+                " {:<2} D {:<17} {:<13} {}\n",
+                i, entry.mac, entry.port, entry.vlan
+            ));
+        }
+        out
+    }
+
     fn render_export(&self, state: &DeviceState) -> String {
         let mut out = String::new();
         out.push_str("# RouterOS 7.15\n# model = RouteCraft Virtual\n");
@@ -252,6 +280,10 @@ impl CliEngine for MikroTikCliEngine {
                     CliResponse::ok("failure: dst-address and gateway required\n")
                 }
             }
+            "ip arp print" => CliResponse::ok(self.render_ip_arp_print(state)),
+            "interface bridge host print" | "interface ethernet switch unicast-fdb print" => {
+                CliResponse::ok(self.render_bridge_host_print(state))
+            }
             "export" => CliResponse::ok(self.render_export(state)),
             "quit" => CliResponse::exit(),
             // Navigation into submenus
@@ -263,12 +295,24 @@ impl CliEngine for MikroTikCliEngine {
                 self.current_path = vec!["ip".to_string(), "address".to_string()];
                 CliResponse::empty()
             }
+            "ip arp" => {
+                self.current_path = vec!["ip".to_string(), "arp".to_string()];
+                CliResponse::empty()
+            }
             "ip route" => {
                 self.current_path = vec!["ip".to_string(), "route".to_string()];
                 CliResponse::empty()
             }
             "interface" => {
                 self.current_path = vec!["interface".to_string()];
+                CliResponse::empty()
+            }
+            "interface bridge" => {
+                self.current_path = vec!["interface".to_string(), "bridge".to_string()];
+                CliResponse::empty()
+            }
+            "interface bridge host" => {
+                self.current_path = vec!["interface".to_string(), "bridge".to_string(), "host".to_string()];
                 CliResponse::empty()
             }
             _ => CliResponse::ok(format!("bad command name {}\n", trimmed)),
@@ -278,8 +322,10 @@ impl CliEngine for MikroTikCliEngine {
     fn complete(&self, _state: &DeviceState, input: &str) -> Vec<String> {
         let commands = vec![
             "/interface print",
+            "/interface bridge host print",
             "/ip address print",
             "/ip address add",
+            "/ip arp print",
             "/ip route print",
             "/ip route add",
             "/system identity set",
