@@ -33,6 +33,17 @@ export const DecisionLogPanel: React.FC<Props> = ({
     }
   };
 
+  const getProtocolAccent = (proto: string) => {
+    switch (proto) {
+      case 'ARP':
+        return 'border-l-emerald-500';
+      case 'ICMP':
+        return 'border-l-cyan-500';
+      default:
+        return 'border-l-amber-500';
+    }
+  };
+
   return (
     <div className="w-[360px] bg-[#0E1524] border-r border-gray-800 flex flex-col h-full z-10">
       {/* Panel Header */}
@@ -77,10 +88,12 @@ export const DecisionLogPanel: React.FC<Props> = ({
               <div
                 key={ev.id}
                 onClick={() => onSelectEvent(ev)}
-                className={`rounded-xl border p-3 cursor-pointer transition-all ${
+                className={`animate-slide-in rounded-xl border border-l-4 p-3 cursor-pointer transition-all ${getProtocolAccent(
+                  ev.protocol
+                )} ${
                   isSelected
-                    ? 'bg-[#1E293B] border-blue-500 shadow-md shadow-blue-500/10'
-                    : 'bg-[#131B2E] border-gray-800/80 hover:border-gray-700'
+                    ? 'bg-[#1E293B] border-y-blue-500/60 border-r-blue-500/60 shadow-md shadow-blue-500/10'
+                    : 'bg-[#131B2E] border-y-gray-800/80 border-r-gray-800/80 hover:bg-[#17213A] hover:border-y-gray-700 hover:border-r-gray-700'
                 }`}
               >
                 {/* Event Header */}

@@ -170,7 +170,7 @@ export const TopologyCanvas: React.FC<Props> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full bg-[#0B0F19] overflow-hidden select-none cursor-default ${
+      className={`canvas-backdrop relative w-full h-full overflow-hidden select-none cursor-default ${
         isCableToolActive ? 'cursor-crosshair' : ''
       }`}
       onMouseMove={handleMouseMove}
@@ -183,10 +183,6 @@ export const TopologyCanvas: React.FC<Props> = ({
         if (e.target === e.currentTarget && !isCableToolActive) {
           onSelectNode('');
         }
-      }}
-      style={{
-        backgroundImage: `radial-gradient(circle, #1F2937 1px, transparent 1px)`,
-        backgroundSize: '24px 24px',
       }}
     >
       {/* Drop Zone Visual Overlay during Drag */}
@@ -203,7 +199,7 @@ export const TopologyCanvas: React.FC<Props> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.stopPropagation()}
-        className="absolute top-4 left-4 z-20 flex items-center gap-2 bg-[#111827]/90 backdrop-blur-md p-1.5 rounded-xl border border-gray-800 shadow-xl"
+        className="glass absolute top-4 left-4 z-20 flex items-center gap-2 p-1.5 rounded-xl border border-gray-700/60 shadow-xl shadow-black/30"
       >
         {/* Toggle Hardware Catalog Drawer */}
         <button
@@ -308,12 +304,13 @@ export const TopologyCanvas: React.FC<Props> = ({
                 y1={y1}
                 x2={x2}
                 y2={y2}
-                stroke={link.is_connected ? '#374151' : '#EF4444'}
-                strokeWidth={link.is_connected ? 3 : 2}
+                stroke={link.is_connected ? '#334155' : '#EF4444'}
+                strokeWidth={link.is_connected ? 4 : 2}
+                strokeLinecap="round"
                 strokeDasharray={link.is_connected ? undefined : '6,6'}
               />
 
-              {/* Status glow if active */}
+              {/* Flowing status line if link is up */}
               {link.is_connected && (
                 <line
                   x1={x1}
@@ -321,8 +318,9 @@ export const TopologyCanvas: React.FC<Props> = ({
                   x2={x2}
                   y2={y2}
                   stroke="#10B981"
-                  strokeWidth={1}
-                  strokeOpacity={0.6}
+                  strokeWidth={1.5}
+                  strokeOpacity={0.7}
+                  className="link-flow"
                 />
               )}
             </g>
@@ -348,19 +346,25 @@ export const TopologyCanvas: React.FC<Props> = ({
               : '#F59E0B';
 
           return (
-            <g>
+            <g key={activePacket.id}>
               <line
                 x1={x1}
                 y1={y1}
                 x2={x2}
                 y2={y2}
                 stroke={color}
-                strokeWidth={4}
-                strokeDasharray="8 8"
-                className="animate-pulse"
+                strokeWidth={3}
+                strokeOpacity={0.35}
+                strokeLinecap="round"
               />
-              <circle cx={x2} cy={y2} r={14} fill={color} fillOpacity={0.4} />
-              <circle cx={x2} cy={y2} r={6} fill={color} />
+              <circle r={12} fill={color} fillOpacity={0.25}>
+                <animate attributeName="cx" from={x1} to={x2} dur="0.65s" fill="freeze" />
+                <animate attributeName="cy" from={y1} to={y2} dur="0.65s" fill="freeze" />
+              </circle>
+              <circle r={6} fill={color}>
+                <animate attributeName="cx" from={x1} to={x2} dur="0.65s" fill="freeze" />
+                <animate attributeName="cy" from={y1} to={y2} dur="0.65s" fill="freeze" />
+              </circle>
             </g>
           );
         })()}
@@ -437,12 +441,12 @@ export const TopologyCanvas: React.FC<Props> = ({
             style={{
               transform: `translate(${pos.x}px, ${pos.y}px)`,
             }}
-            className={`absolute w-20 h-20 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-all duration-150 ${
+            className={`animate-node-pop absolute w-20 h-20 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-[border-color,box-shadow,background-color] duration-150 ${
               isCableSource
                 ? 'bg-amber-950/80 border-2 border-amber-400 shadow-xl shadow-amber-500/30'
                 : isSelected
-                ? 'bg-[#1E293B] border-2 border-blue-500 shadow-lg shadow-blue-500/20 ring-2 ring-blue-400/40'
-                : 'bg-[#111827] border border-gray-700/80 hover:border-gray-500 hover:bg-[#162032]'
+                ? 'bg-gradient-to-b from-[#1E293B] to-[#172033] border-2 border-blue-500 shadow-lg shadow-blue-500/25 ring-4 ring-blue-500/15'
+                : 'bg-gradient-to-b from-[#16203A] to-[#0F172A] border border-gray-700/80 shadow-md shadow-black/30 hover:border-blue-400/60 hover:shadow-blue-500/10'
             }`}
           >
             <div className="relative">

@@ -74,7 +74,7 @@ export const SimulationControls: React.FC<Props> = ({
   };
 
   return (
-    <div className="h-14 bg-[#0F172A] border-b border-gray-800 px-4 flex items-center justify-between z-10 gap-3">
+    <div className="glass h-14 border-b border-gray-700/50 shadow-lg shadow-black/20 px-4 flex items-center justify-between z-10 gap-3">
       {/* Brand & Preset Loader */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
