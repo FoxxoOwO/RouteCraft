@@ -1,0 +1,12 @@
+{
+  "name": "routecraft",
+  "private": true,
+  "description": "RouteCraft - Interactive Discrete-Event Network Simulator and Multi-Vendor Lab",
+  "scripts": {
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "wasm:build": "wasm-pack build crates/routecraft-wasm --target web",
+    "desktop:dev": "npm --prefix apps/web run desktop:dev",
+    "desktop:build": "npm --prefix apps/web run desktop:build"
+  }
+}

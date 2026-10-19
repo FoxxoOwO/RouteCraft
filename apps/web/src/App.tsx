@@ -16,6 +16,15 @@ import { AutoGraderModal } from './components/AutoGraderModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DeviceCatalogDrawer } from './components/DeviceCatalogDrawer';
 import { DeviceModel, NodeVendorMeta, resolveNodeVendorMeta } from './types/devices';
+import {
+  isTauriApp,
+  desktopOpenLab,
+  desktopSaveLab,
+  desktopSaveLabFile,
+  desktopGetCliStartupFile,
+  desktopToggleFullscreen,
+  listenDesktopMenuEvents,
+} from './utils/desktop';
 
 export const App: React.FC = () => {
   const [wasmReady, setWasmReady] = useState(false);
@@ -33,6 +42,11 @@ export const App: React.FC = () => {
   const [pendingCount, setPendingCount] = useState(0);
   const [isCatalogOpen, setIsCatalogOpen] = useState(true);
   const [nodeVendorMap, setNodeVendorMap] = useState<Record<string, NodeVendorMeta>>({});
+
+  // Desktop specific state
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const [currentFileName, setCurrentFileName] = useState<string | null>(null);
 
   // Challenges & Auto-Grader state
   const [activeChallenge, setActiveChallenge] = useState<ChallengeDefinition>(LAB_CHALLENGES[0]);
@@ -54,6 +68,22 @@ export const App: React.FC = () => {
         await init('/routecraft_wasm_bg.wasm');
       }
       setWasmReady(true);
+
+      if (isTauriApp()) {
+        setIsDesktop(true);
+        try {
+          const startup = await desktopGetCliStartupFile();
+          if (startup) {
+            setCurrentFilePath(startup.filePath);
+            setCurrentFileName(startup.fileName);
+            handleImportTopology(startup.content);
+            return;
+          }
+        } catch (e) {
+          console.warn('CLI startup file error:', e);
+        }
+      }
+
       loadPreset('vlan');
     };
 
@@ -430,10 +460,22 @@ export const App: React.FC = () => {
   };
 
   // Export / Import
-  const handleExportTopology = () => {
+  const handleExportTopology = useCallback(async () => {
     if (!simRef.current) return;
     try {
       const json = simRef.current.export_topology_json();
+      if (isTauriApp()) {
+        const defaultName = currentFileName || `routecraft_lab_${Date.now()}.onlab`;
+        const savedPath = await desktopSaveLab(json, defaultName);
+        if (savedPath) {
+          setCurrentFilePath(savedPath);
+          const name = savedPath.split(/[/\\]/).pop() || 'lab.onlab';
+          setCurrentFileName(name);
+        }
+        return;
+      }
+
+      // Web fallback
       const blob = new Blob([json], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -444,9 +486,23 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Export failed:', err);
     }
-  };
+  }, [currentFileName]);
 
-  const handleImportTopology = (jsonStr: string) => {
+  const handleQuickSave = useCallback(async () => {
+    if (!simRef.current) return;
+    try {
+      const json = simRef.current.export_topology_json();
+      if (isTauriApp() && currentFilePath) {
+        await desktopSaveLabFile(currentFilePath, json);
+        return;
+      }
+      await handleExportTopology();
+    } catch (err) {
+      console.error('Quick save failed:', err);
+    }
+  }, [currentFilePath, handleExportTopology]);
+
+  const handleImportTopology = useCallback((jsonStr: string) => {
     if (!simRef.current) return;
     try {
       simRef.current.import_topology_json(jsonStr);
@@ -474,7 +530,83 @@ export const App: React.FC = () => {
       alert(`Import error: ${err}`);
       console.error('Import failed:', err);
     }
-  };
+  }, []);
+
+  const handleNativeOpenLab = useCallback(async () => {
+    if (!simRef.current) return;
+    try {
+      const file = await desktopOpenLab();
+      if (file) {
+        setCurrentFilePath(file.filePath);
+        setCurrentFileName(file.fileName);
+        handleImportTopology(file.content);
+      }
+    } catch (err) {
+      console.error('Native open failed:', err);
+    }
+  }, [handleImportTopology]);
+
+  // Desktop keyboard shortcuts (Ctrl+S, Ctrl+O, F11)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleQuickSave();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        if (isTauriApp()) {
+          handleNativeOpenLab();
+        } else {
+          const fileInput = document.getElementById('routecraft-file-input') as HTMLInputElement | null;
+          fileInput?.click();
+        }
+      } else if (e.key === 'F11') {
+        e.preventDefault();
+        if (isTauriApp()) {
+          desktopToggleFullscreen();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleQuickSave, handleNativeOpenLab]);
+
+  // Desktop native menu events
+  useEffect(() => {
+    if (!isTauriApp()) return;
+    const unlisten = listenDesktopMenuEvents((eventId) => {
+      switch (eventId) {
+        case 'new_lab':
+          loadPreset('basic');
+          setCurrentFilePath(null);
+          setCurrentFileName(null);
+          break;
+        case 'open_lab':
+          handleNativeOpenLab();
+          break;
+        case 'save_lab':
+          handleQuickSave();
+          break;
+        case 'save_lab_as':
+          handleExportTopology();
+          break;
+        case 'toggle_fullscreen':
+          desktopToggleFullscreen();
+          break;
+        case 'challenges':
+          setIsGraderModalOpen(true);
+          break;
+        case 'about_routecraft':
+          alert(
+            'RouteCraft Desktop v0.1.0\n\nNativní desktopová aplikace pro síťové simulace s multi-vendor CLI (Cisco, MikroTik, Linux).\n\nBěží na jádře Tauri v2 a Rust Discrete-Event Engine.'
+          );
+          break;
+      }
+    });
+
+    return () => unlisten();
+  }, [handleQuickSave, handleNativeOpenLab, handleExportTopology]);
 
   // Live auto-grader evaluation on topology or events change
   useEffect(() => {
@@ -513,10 +645,17 @@ export const App: React.FC = () => {
         isPlaying={isPlaying}
         onTogglePlay={() => setIsPlaying((p) => !p)}
         onStep={handleStep}
-        onReset={(preset) => loadPreset(preset)}
+        onReset={(preset) => {
+          loadPreset(preset);
+          setCurrentFilePath(null);
+          setCurrentFileName(null);
+        }}
         onTriggerPing={handleTriggerPing}
         onExportTopology={handleExportTopology}
         onImportTopology={handleImportTopology}
+        onNativeImport={isDesktop ? handleNativeOpenLab : undefined}
+        isDesktop={isDesktop}
+        currentFileName={currentFileName}
         onOpenChallenges={() => setIsGraderModalOpen(true)}
         challengeProgress={{
           completed: completedObjectives,

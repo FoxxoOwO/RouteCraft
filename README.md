@@ -125,7 +125,36 @@
    npm install
    npm run dev
    ```
-   Open `http://localhost:3000/` in your browser!
+### Running Desktop Edition (Tauri v2)
+
+RouteCraft can be run as a lightweight native desktop application:
+
+1. **Desktop Development Mode:**
+   ```bash
+   # From root directory:
+   npm run desktop:dev
+   # Or from apps/web:
+   cd apps/web
+   npm run desktop:dev
+   ```
+
+2. **Build Standalone Desktop Binary:**
+   ```bash
+   # Cargo standalone build:
+   cargo build --release -p routecraft-desktop
+   # Or via Tauri packager:
+   npm run desktop:build
+   ```
+
+3. **Desktop Features:**
+   - **Native System File Dialogs:** Seamless Open & Save `.onlab` files with standard Windows file dialogs.
+   - **Windows File Association:** Double-click any `.onlab` file in Windows Explorer to open it directly in RouteCraft.
+   - **Native Application Menu & Shortcuts:**
+     - `Ctrl+O` – Open lab topology
+     - `Ctrl+S` – Quick save / Save lab topology
+     - `Ctrl+Shift+S` – Save lab topology as...
+     - `F11` – Toggle fullscreen
+     - Menu items for Auto-Grader Challenges and Help.
 
 ---
 

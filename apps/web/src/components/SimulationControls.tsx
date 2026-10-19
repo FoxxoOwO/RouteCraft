@@ -10,6 +10,9 @@ interface Props {
   onTriggerPing: (srcNodeId: string, targetIp: string) => void;
   onExportTopology: () => void;
   onImportTopology: (jsonStr: string) => void;
+  onNativeImport?: () => void;
+  isDesktop?: boolean;
+  currentFileName?: string | null;
   onOpenChallenges: () => void;
   challengeProgress: { completed: number; total: number; percentage: number };
   pendingEventCount: number;
@@ -24,6 +27,9 @@ export const SimulationControls: React.FC<Props> = ({
   onTriggerPing,
   onExportTopology,
   onImportTopology,
+  onNativeImport,
+  isDesktop,
+  currentFileName,
   onOpenChallenges,
   challengeProgress,
   pendingEventCount,
@@ -78,9 +84,20 @@ export const SimulationControls: React.FC<Props> = ({
           <div>
             <h1 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
               RouteCraft
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 font-mono">
-                Wasm DES v0.1
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                  isDesktop
+                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/50'
+                    : 'bg-blue-900/60 text-blue-300'
+                }`}
+              >
+                {isDesktop ? 'Desktop Edition' : 'Wasm DES v0.1'}
               </span>
+              {currentFileName && (
+                <span className="text-[11px] font-normal text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700 font-mono max-w-[140px] truncate">
+                  {currentFileName}
+                </span>
+              )}
             </h1>
           </div>
         </div>
@@ -115,18 +132,25 @@ export const SimulationControls: React.FC<Props> = ({
           <button
             onClick={onExportTopology}
             className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-gray-800 rounded-lg transition-colors"
-            title="Export Topology (.onlab / JSON)"
+            title={isDesktop ? 'Uložit laboratoř (.onlab) [Ctrl+S]' : 'Exportovat laboratoř (.onlab / JSON)'}
           >
             <Download className="w-4 h-4" />
           </button>
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (onNativeImport) {
+                onNativeImport();
+              } else {
+                fileInputRef.current?.click();
+              }
+            }}
             className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-gray-800 rounded-lg transition-colors"
-            title="Import Topology (.onlab / JSON)"
+            title={isDesktop ? 'Otevřít laboratoř (.onlab) [Ctrl+O]' : 'Importovat laboratoř (.onlab / JSON)'}
           >
             <Upload className="w-4 h-4" />
           </button>
           <input
+            id="routecraft-file-input"
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}

@@ -6,6 +6,7 @@ members = [
     "crates/routecraft-protocols",
     "crates/routecraft-engine",
     "crates/routecraft-wasm",
+    "apps/web/src-tauri",
 ]
 
 [workspace.package]

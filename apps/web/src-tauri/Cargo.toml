@@ -1,0 +1,24 @@
+[package]
+name = "routecraft-desktop"
+version = "0.1.0"
+description = "RouteCraft - Interactive Discrete-Event Network Simulator"
+authors = ["RouteCraft Contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/FoxxoOwO/RouteCraft"
+edition = "2021"
+
+[lib]
+name = "routecraft_desktop_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3" }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.4" }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+rfd = "0.16"
